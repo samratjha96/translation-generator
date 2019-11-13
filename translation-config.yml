@@ -1,0 +1,5 @@
+bundles:
+  - path: .
+    extension: properties
+  - path: src/main/resources
+    extension: json
