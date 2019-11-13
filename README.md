@@ -6,7 +6,7 @@ This tool is designed to fix the pain of developing in one locale but having to 
     * Run `pip3 install virtualenv` if you don't already have it
 * Run `virtualenv translation`
 * Run `source translation/bin/activate` to activate this virtual environment
-* Run `pip3 install -r requirements.txt` to configure all the dependencies
+* Run `pip install -r requirements.txt` to configure all the dependencies
 
 # Usage
 * Create a file called `translation-config.yml` in the root of your repository that you want to use this tool on
