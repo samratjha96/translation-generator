@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import re
 import yaml
 
 program = os.path.basename(sys.argv[0])
@@ -25,7 +26,7 @@ class Driver:
                           help='generate lock file',
                           action='store_true', default=False)
         return parser.parse_args(args)
-    
+
     def load_config(self):
         if os.path.exists(config_file):
             with open(config_file, 'r') as f:
@@ -33,11 +34,46 @@ class Driver:
         return data
 
 class Bundle(object):
+    whoami = __qualname__
     def __init__(self, path, extension, files, default_locale=None):
         self.path = path
         self.extension = extension
         self.files = set(files)
         self.default_locale = default_locale or "en_US"
+
+    def get_default_locale_full_path(self):
+        locale_regex_match = []
+        for file in self.files:
+            if re.match(rf'.*_{self.default_locale}.*', file):
+                locale_regex_match.append(file)
+        if len(locale_regex_match) > 1:
+            sys.exit(
+                f'{self.whoami}: There were multiple regex matches of '
+                + f'_{self.default_locale} in {self.path}: {locale_regex_match}. '
+                + f'Expecting only a single match'
+            )
+        elif len(locale_regex_match) == 0:
+            sys.exit(
+                f'{self.whoami}: Expected default locale file to match regex '
+                + f'.*_{self.default_locale} but no files in {self.path} matched'
+            )
+        else:
+            return locale_regex_match[0]
+
+    def use_snapshot_file(self):
+        default_locale_path = self.get_default_locale_full_path()
+        snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
+        if not os.path.exists(snapshot_file_path):
+            print(
+                f'generating snapshot file {snapshot_file_path} '
+                + f'based on {default_locale_path}'
+            )
+            with open(snapshot_file_path, 'a') as snap, open(default_locale_path, 'r') as default:
+                for line in default:
+                    snap.write(line)
+        else:
+            print(f'Using existing snapshot {snapshot_file_path}')
+        return snapshot_file_path
 
 class SnapshotGenerator:
     all_bundles = []
@@ -58,6 +94,8 @@ class SnapshotGenerator:
     def process(self, data):
         for bundle in data.get('bundles'):
             self.parse_bundle(bundle)
+        for bundle_obj in self.all_bundles:
+            bundle_obj.use_snapshot_file()
 
 class Validator:
     whoami = __qualname__
