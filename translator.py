@@ -55,12 +55,10 @@ class Generator:
                         f'{whoami}: .{extension} files are not one of the supported types\n' +
                         ', '.join(sorted(ACCEPTED_FILE_TYPES))
                     )
-                found = False
                 for fname in os.listdir(path):
                     if fname.endswith(extension):
-                        found = True
                         break
-                if not found:
+                else:
                     sys.exit(f'{whoami}: no .{extension} file found in {path}')    
         else:
             sys.exit(f'{whoami}: {self.DATAFILE} does not have any bundles')
