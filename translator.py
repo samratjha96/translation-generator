@@ -40,12 +40,11 @@ class Bundle(object):
         self.default_locale = default_locale or "en_US"
 
 class SnapshotGenerator:
-    whoami = __qualname__
     all_bundles = []
 
     def parse_bundle(self, bundle):
-        path = bundle['path']
-        extension = bundle['extension']
+        path = bundle.get('path')
+        extension = bundle.get('extension')
         default_locale = bundle.get('default_locale')
         resolved_path = Validator().resolve_path(path)
         all_files_in_bundle_path = []
@@ -57,22 +56,22 @@ class SnapshotGenerator:
         self.all_bundles.append(bundle_object)
 
     def process(self, data):
-        for bundle in data['bundles']:
+        for bundle in data.get('bundles'):
             self.parse_bundle(bundle)
 
 class Validator:
     whoami = __qualname__
     def validate(self, data):
         ACCEPTED_FILE_TYPES = {'properties', 'json'}
-        if data and 'bundles' in data and data['bundles']:
-            for bundle in data['bundles']:
+        if data and 'bundles' in data and data.get('bundles'):
+            for bundle in data.get('bundles'):
                 self.validate_keys_in_bundle(bundle)
-                path = self.resolve_path(bundle['path'])
+                path = self.resolve_path(bundle.get('path'))
                 if not os.path.exists(path):
                     sys.exit(
                         f'{self.whoami}: {path} does not exist'
                     )
-                extension = bundle['extension']
+                extension = bundle.get('extension')
                 if extension not in ACCEPTED_FILE_TYPES:
                     sys.exit(
                         f'{self.whoami}: .{extension} files are not one of the supported types\n' +
