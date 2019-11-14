@@ -1,5 +1,6 @@
 bundles:
   - path: .
     extension: properties
+    default_locale: en_GB
   - path: src/main/resources
     extension: json

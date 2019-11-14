@@ -12,7 +12,7 @@ class Driver:
         generate = options.generate
         data = self.load_config()
         Validator().validate(data)
-        BundleGenerator().process(data)
+        SnapshotGenerator().process(data)
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -32,15 +32,29 @@ class Driver:
                 data = yaml.full_load(f)
         return data
 
-class BundleGenerator:
-    
+class Bundle(object):
+    def __init__(self, path, extension, files, default_locale=None):
+        self.path = path
+        self.extension = extension
+        self.files = set(files)
+        self.default_locale = default_locale or "en_US"
+
+class SnapshotGenerator:
+    whoami = __qualname__
+    all_bundles = []
+
     def parse_bundle(self, bundle):
         path = bundle['path']
         extension = bundle['extension']
+        default_locale = bundle.get('default_locale')
         resolved_path = Validator().resolve_path(path)
+        all_files_in_bundle_path = []
         for file in os.listdir(resolved_path):
             if file.endswith(extension):
-                print(os.path.join(resolved_path, file))
+                file_path = os.path.join(resolved_path, file)
+                all_files_in_bundle_path.append(file_path)
+        bundle_object = Bundle(resolved_path, extension, all_files_in_bundle_path, default_locale)
+        self.all_bundles.append(bundle_object)
 
     def process(self, data):
         for bundle in data['bundles']:
