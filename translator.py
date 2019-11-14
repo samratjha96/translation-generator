@@ -3,6 +3,7 @@ import os
 import sys
 import re
 import yaml
+import json
 
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
@@ -13,7 +14,7 @@ class Driver:
         generate = options.generate
         data = self.load_config()
         Validator().validate(data)
-        SnapshotGenerator().process(data)
+        Generator().process(data)
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -32,6 +33,61 @@ class Driver:
             with open(config_file, 'r') as f:
                 data = yaml.full_load(f)
         return data
+
+class JsonParser(object):
+    '''
+        Parser that converts a list of json files into a dictionary representation
+        where the key is the filename itself and the value is the json parsing of the file
+    '''
+
+    files = []
+    dict_representation = {}
+
+    def __init__(self, files):
+        self.files = set(files)
+        self.parse_to_dict(files)
+
+    def parse_to_dict(self, files):
+        for file in files:
+            with open(file) as handle:
+                dictdump = json.loads(handle.read())
+            self.dict_representation[file] = dictdump
+
+    def to_dictionary(self):
+        return self.dict_representation
+
+class PropertiesParser(object):
+    '''
+        Parser that converts a list of properties files into a dictionary representation
+        where the key is the filename itself and the value is the (key, value) pair representing
+        each entry in the properties file
+    '''
+
+    files = []
+    separator = '='
+    comment_char='#'
+    dict_representation = {}
+
+    def __init__(self, files):
+        self.files = set(files)
+        self.parse_to_dict(self.files)
+
+    def parse_to_dict(self, files):
+        for file in files:
+            current_file_key_val = {}
+            with open(file, "rt") as f:
+                for line in f:
+                    l = line.strip()
+                    if l and not l.startswith(self.comment_char):
+                        key_value_split = l.split(self.separator)
+                        key = key_value_split[0].strip()
+                        value = self.separator.join(key_value_split[1:]).strip().strip('"')
+                        if value:
+                            current_file_key_val[key] = value
+            self.dict_representation[file] = current_file_key_val
+
+    def to_dictionary(self):
+        return self.dict_representation
 
 class Bundle(object):
     whoami = __qualname__
@@ -75,7 +131,7 @@ class Bundle(object):
             print(f'Using existing snapshot {snapshot_file_path}')
         return snapshot_file_path
 
-class SnapshotGenerator:
+class Generator:
     all_bundles = []
 
     def parse_bundle(self, bundle):
@@ -88,7 +144,7 @@ class SnapshotGenerator:
             if file.endswith(extension):
                 file_path = os.path.join(resolved_path, file)
                 all_files_in_bundle_path.append(file_path)
-        bundle_object = Bundle(resolved_path, extension, all_files_in_bundle_path, default_locale)
+        bundle_object = Bundle(path=resolved_path, extension=extension, files=all_files_in_bundle_path, default_locale=default_locale)
         self.all_bundles.append(bundle_object)
 
     def process(self, data):
