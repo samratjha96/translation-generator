@@ -11,10 +11,11 @@ This tool is designed to fix the pain of developing in one locale but having to 
 # Usage
 * Create a file called `translation-config.yml` in the root of your repository that you want to use this tool on
 * The `translation-config.yml` file should look like this:
-```
+```yaml
 bundles:
   - path: <path/to/your/bundle>
     extension: <properties | json>
+    default_locale: <locale_key> # optional key. Defaults to en_US if not provided
 ```
 where each entry under `bundles` corresponds to a resource bundle that you want to manage with this tool
 * Run `python3 translator.py --generate` to begin using the tool
