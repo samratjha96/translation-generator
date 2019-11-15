@@ -12,15 +12,21 @@ class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         generate = options.generate
+        self.json_output = options.output == "json"
         data = self.load_config()
         Validator().validate(data)
-        Generator().process(data)
+        BundleGenerator().process(data)
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
             prog=prog,
             description='Generator for candidate translation strings',
         )
+
+        parser.add_argument('--output',
+                            help='output type',
+                            choices=("text", "json"),
+                            default="text")
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument('--generate',
@@ -49,11 +55,11 @@ class JsonParser(object):
 
     def parse_to_dict(self, files):
         for file in files:
-            with open(file) as handle:
-                dictdump = json.loads(handle.read())
+            with open(file) as f:
+                dictdump = json.loads(f.read())
             self.dict_representation[file] = dictdump
 
-    def to_dictionary(self):
+    def get_as_dictionary(self):
         return self.dict_representation
 
 class PropertiesParser(object):
@@ -86,7 +92,7 @@ class PropertiesParser(object):
                             current_file_key_val[key] = value
             self.dict_representation[file] = current_file_key_val
 
-    def to_dictionary(self):
+    def get_as_dictionary(self):
         return self.dict_representation
 
 class Bundle(object):
@@ -116,7 +122,7 @@ class Bundle(object):
         else:
             return locale_regex_match[0]
 
-    def use_snapshot_file(self):
+    def generate_snapshot_file(self):
         default_locale_path = self.get_default_locale_full_path()
         snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
         if not os.path.exists(snapshot_file_path):
@@ -131,7 +137,7 @@ class Bundle(object):
             print(f'Using existing snapshot {snapshot_file_path}')
         return snapshot_file_path
 
-class Generator:
+class BundleGenerator:
     all_bundles = []
 
     def parse_bundle(self, bundle):
@@ -151,7 +157,8 @@ class Generator:
         for bundle in data.get('bundles'):
             self.parse_bundle(bundle)
         for bundle_obj in self.all_bundles:
-            bundle_obj.use_snapshot_file()
+            bundle_obj.generate_snapshot_file()
+        TranslationGenerator(self.all_bundles).generate_all()
 
 class TranslationGenerator:
     '''
@@ -159,6 +166,21 @@ class TranslationGenerator:
         to generate all the differences between the default_locale, it's corresponding
         snapshot and all the other locales
     '''
+
+    all_bundles = []
+
+    def __init__(self, all_bundles):
+        self.all_bundles = all_bundles
+
+    def process_bundle(self, bundle):
+        if bundle.extension == 'json':
+            parsed_bundle = JsonParser(bundle.files)
+            print(json.dumps(parsed_bundle.get_as_dictionary(), indent=4))
+
+    def generate_all(self):
+        for bundle in self.all_bundles:
+            self.process_bundle(bundle)
+
 
 class Validator:
     whoami = __qualname__
