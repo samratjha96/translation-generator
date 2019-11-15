@@ -153,6 +153,13 @@ class Generator:
         for bundle_obj in self.all_bundles:
             bundle_obj.use_snapshot_file()
 
+class TranslationGenerator:
+    '''
+        This class will accept a list of Bundle objects and apply the necessary parser
+        to generate all the differences between the default_locale, it's corresponding
+        snapshot and all the other locales
+    '''
+
 class Validator:
     whoami = __qualname__
     def validate(self, data):
