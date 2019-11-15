@@ -187,15 +187,23 @@ class TranslationGenerator:
         else:
             source_keys = set(source_dict.keys())
             candidate_keys = set(candidate_dict.keys())
-            added = candidate_keys - source_keys
-        return added
+            new_keys = candidate_keys - source_keys
+            '''
+                TODO: Ignoring the capability to actually make an inplace
+                edit on the default locale file for any key value pair.
+                With the logic currently implemented, this will show up
+                simply as a "new addition" and the snapshot file will
+                become stale with the old key that was actually "removed"
+                in the default locale file. How do we reconcile this?
+            '''
+        return [candidate_dict[key] for key in new_keys]
 
     def process_bundle(self, bundle):
         if bundle.extension == 'json':
             parsed_bundle = JsonParser(bundle.files).get_as_dictionary()
             snapshot_file = bundle.generate_snapshot_file()
             default_locale = bundle.get_default_locale_file()
-            self.compare(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
+            print(self.compare(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle))
 
     def generate_all(self):
         for bundle in self.all_bundles:
