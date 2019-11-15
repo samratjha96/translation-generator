@@ -45,7 +45,6 @@ class JsonParser(object):
         Parser that converts a list of json files into a dictionary representation
         where the key is the filename itself and the value is the json parsing of the file
     '''
-
     files = []
     dict_representation = {}
 
@@ -68,7 +67,6 @@ class PropertiesParser(object):
         where the key is the filename itself and the value is the (key, value) pair representing
         each entry in the properties file
     '''
-
     files = []
     separator = '='
     comment_char='#'
@@ -97,16 +95,23 @@ class PropertiesParser(object):
 
 class Bundle(object):
     whoami = __qualname__
+
     def __init__(self, path, extension, files, default_locale=None):
         self.path = path
         self.extension = extension
         self.files = set(files)
         self.default_locale = default_locale or "en_US"
 
-    def get_default_locale_full_path(self):
+    def get_default_locale_file(self):
         locale_regex_match = []
         for file in self.files:
-            if re.match(rf'.*_{self.default_locale}.*', file):
+            '''
+                This regex matches all files that have _{default_locale} in their
+                filename but not if that file also contains the word snapshot. This
+                is to prevent the regex matching of the snapshot file when looking
+                for the default locale file
+            '''
+            if re.match(rf'.*_{self.default_locale}(?!(.*snapshot)).*', file):
                 locale_regex_match.append(file)
         if len(locale_regex_match) > 1:
             sys.exit(
@@ -123,7 +128,7 @@ class Bundle(object):
             return locale_regex_match[0]
 
     def generate_snapshot_file(self):
-        default_locale_path = self.get_default_locale_full_path()
+        default_locale_path = self.get_default_locale_file()
         snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
         if not os.path.exists(snapshot_file_path):
             print(
@@ -133,8 +138,8 @@ class Bundle(object):
             with open(snapshot_file_path, 'a') as snap, open(default_locale_path, 'r') as default:
                 for line in default:
                     snap.write(line)
-        else:
-            print(f'Using existing snapshot {snapshot_file_path}')
+        if snapshot_file_path not in self.files:
+            self.files.add(snapshot_file_path)
         return snapshot_file_path
 
 class BundleGenerator:
@@ -168,14 +173,29 @@ class TranslationGenerator:
     '''
 
     all_bundles = []
+    to_translate = []
 
     def __init__(self, all_bundles):
         self.all_bundles = all_bundles
 
+    def compare(self, source, candidate, bundle):
+        source_dict = bundle[source]
+        candidate_dict = bundle[candidate]
+        if source_dict == candidate_dict:
+            print(f'Translations are up to date')
+            sys.exit(0)
+        else:
+            source_keys = set(source_dict.keys())
+            candidate_keys = set(candidate_dict.keys())
+            added = candidate_keys - source_keys
+        return added
+
     def process_bundle(self, bundle):
         if bundle.extension == 'json':
-            parsed_bundle = JsonParser(bundle.files)
-            print(json.dumps(parsed_bundle.get_as_dictionary(), indent=4))
+            parsed_bundle = JsonParser(bundle.files).get_as_dictionary()
+            snapshot_file = bundle.generate_snapshot_file()
+            default_locale = bundle.get_default_locale_file()
+            self.compare(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
 
     def generate_all(self):
         for bundle in self.all_bundles:
