@@ -4,6 +4,7 @@ import sys
 import re
 import yaml
 import json
+import jinja2
 from collections import defaultdict
 
 program = os.path.basename(sys.argv[0])
@@ -213,21 +214,23 @@ class TranslationGenerator:
             parsed_bundle = PropertiesParser(bundle.files).get_as_dictionary()
         else:
             pass
-
         snapshot_file = bundle.generate_snapshot_file()
         default_locale = bundle.get_default_locale_file()
         self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
         self.check_missing_keys_in_other_locales(source=snapshot_file, bundle=parsed_bundle)
-        if self.missing:
-            print(json.dumps(Utilities().dict_to_json(self.missing), indent=4))
-        if self.additions:
-            print(json.dumps(Utilities().dict_to_json(self.additions), indent=4))
 
     def generate_all(self):
         for bundle in self.all_bundles:
             self.process_bundle(bundle)
+        Reconciliator().apply_template(self.missing, self.additions)
 
+class Reconciliator:
 
+    def apply_template(self, missing, added):
+        with open('./localizer.jinja') as f:
+            template = jinja2.Environment(
+                loader=jinja2.FileSystemLoader('.')).from_string(f.read())
+            print(template.render(missing=missing, added=added))
 class Validator:
     whoami = __qualname__
     def validate(self, data):
