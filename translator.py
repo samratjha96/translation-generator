@@ -4,6 +4,7 @@ import sys
 import re
 import yaml
 import json
+from collections import defaultdict
 
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
@@ -149,7 +150,7 @@ class BundleGenerator:
         path = bundle.get('path')
         extension = bundle.get('extension')
         default_locale = bundle.get('default_locale')
-        resolved_path = Validator().resolve_path(path)
+        resolved_path = Utilities().resolve_path(path)
         all_files_in_bundle_path = []
         for file in os.listdir(resolved_path):
             if file.endswith(extension):
@@ -171,23 +172,28 @@ class TranslationGenerator:
         to generate all the differences between the default_locale, it's corresponding
         snapshot and all the other locales
     '''
-
+    whoami = __qualname__
     all_bundles = []
-    to_translate = []
+    additions = {}
+    missing = {}
 
     def __init__(self, all_bundles):
         self.all_bundles = all_bundles
 
-    def compare(self, source, candidate, bundle):
+    def check_missing_keys_in_other_locales(self, source, bundle):
+        source_dict = bundle[source]
+        for file in bundle.keys():
+            missing_keys = {}
+            candidate_dict = bundle[file]
+            missing_keys = [x for x in source_dict.keys() if x not in candidate_dict.keys()]
+            if missing_keys:
+                self.missing[file] = missing_keys
+
+    def new_entries(self, source, candidate, bundle):
         source_dict = bundle[source]
         candidate_dict = bundle[candidate]
-        if source_dict == candidate_dict:
-            print(f'Translations are up to date')
-            sys.exit(0)
-        else:
-            source_keys = set(source_dict.keys())
-            candidate_keys = set(candidate_dict.keys())
-            new_keys = candidate_keys - source_keys
+        if source_dict != candidate_dict:
+            new_values = [candidate_dict[x] for x in candidate_dict.keys() if candidate_dict[x] not in source_dict.values()]
             '''
                 TODO: Ignoring the capability to actually make an inplace
                 edit on the default locale file for any key value pair.
@@ -196,14 +202,26 @@ class TranslationGenerator:
                 become stale with the old key that was actually "removed"
                 in the default locale file. How do we reconcile this?
             '''
-        return [candidate_dict[key] for key in new_keys]
+            if new_values:
+                self.additions[candidate] = new_values
 
     def process_bundle(self, bundle):
+        parsed_bundle = None
         if bundle.extension == 'json':
             parsed_bundle = JsonParser(bundle.files).get_as_dictionary()
-            snapshot_file = bundle.generate_snapshot_file()
-            default_locale = bundle.get_default_locale_file()
-            print(self.compare(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle))
+        elif bundle.extension == 'properties':
+            parsed_bundle = PropertiesParser(bundle.files).get_as_dictionary()
+        else:
+            pass
+
+        snapshot_file = bundle.generate_snapshot_file()
+        default_locale = bundle.get_default_locale_file()
+        self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
+        self.check_missing_keys_in_other_locales(source=snapshot_file, bundle=parsed_bundle)
+        if self.missing:
+            print(json.dumps(Utilities().dict_to_json(self.missing), indent=4))
+        if self.additions:
+            print(json.dumps(Utilities().dict_to_json(self.additions), indent=4))
 
     def generate_all(self):
         for bundle in self.all_bundles:
@@ -217,7 +235,7 @@ class Validator:
         if data and 'bundles' in data and data.get('bundles'):
             for bundle in data.get('bundles'):
                 self.validate_keys_in_bundle(bundle)
-                path = self.resolve_path(bundle.get('path'))
+                path = Utilities().resolve_path(bundle.get('path'))
                 if not os.path.exists(path):
                     sys.exit(
                         f'{self.whoami}: {path} does not exist'
@@ -243,8 +261,13 @@ class Validator:
                f'{self.whoami}: bundle configuration must have keys ' +
                 ', '.join(sorted(REQUIRED_KEYS)))
 
+class Utilities:
     def resolve_path(self, path):
         return os.path.realpath(path)
+
+    def dict_to_json(self, dict):
+        values = [{k: v for k, v in dict.items()}]
+        return values
 
 if __name__ == '__main__':
     try:
