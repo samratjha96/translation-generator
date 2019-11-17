@@ -7,6 +7,7 @@ This tool is designed to fix the pain of developing in one locale but having to 
 * Run `virtualenv translation`
 * Run `source translation/bin/activate` to activate this virtual environment
 * Run `pip install -r requirements.txt` to configure all the dependencies
+* Run `chmod +x translator` and then `sudo cp -r translator /usr/local/bin/translator` to be able to invoke the tool from anywhere
 
 # Usage
 * Create a file called `translation-config.yml` in the root of your repository that you want to use this tool on
@@ -18,4 +19,4 @@ bundles:
     default_locale: <locale_key> # optional key. Defaults to en_US if not provided
 ```
 where each entry under `bundles` corresponds to a resource bundle that you want to manage with this tool
-* Run `python3 translator.py --generate` to begin using the tool
+* Run `translator --generate` to begin using the tool
