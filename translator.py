@@ -213,8 +213,7 @@ class TranslationGenerator:
             parsed_bundle = JsonParser(bundle.files).get_as_dictionary()
         elif bundle.extension == 'properties':
             parsed_bundle = PropertiesParser(bundle.files).get_as_dictionary()
-        else:
-            raise(f'{whoami}: Unsupported bundle extension {bundle.extension}')
+
         snapshot_file = bundle.generate_snapshot_file()
         default_locale = bundle.get_default_locale_file()
         self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
