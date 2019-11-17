@@ -1,2 +1,2 @@
 PyYAML==5.1
-jinja2==2.10
+jinja2==2.10.3

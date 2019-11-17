@@ -14,10 +14,10 @@ class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         generate = options.generate
-        self.json_output = options.output == "json"
         data = self.load_config()
         Validator().validate(data)
-        BundleGenerator().process(data)
+        all_bundles = Bundler().gather(data)
+        TranslationGenerator(options, all_bundles).generate_all()
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -27,8 +27,8 @@ class Driver:
 
         parser.add_argument('--output',
                             help='output type',
-                            choices=("text", "json"),
-                            default="text")
+                            choices=("yaml", "json"),
+                            default="yaml")
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument('--generate',
@@ -144,7 +144,7 @@ class Bundle(object):
             self.files.add(snapshot_file_path)
         return snapshot_file_path
 
-class BundleGenerator:
+class Bundler:
     all_bundles = []
 
     def parse_bundle(self, bundle):
@@ -160,12 +160,12 @@ class BundleGenerator:
         bundle_object = Bundle(path=resolved_path, extension=extension, files=all_files_in_bundle_path, default_locale=default_locale)
         self.all_bundles.append(bundle_object)
 
-    def process(self, data):
+    def gather(self, data):
         for bundle in data.get('bundles'):
             self.parse_bundle(bundle)
         for bundle_obj in self.all_bundles:
             bundle_obj.generate_snapshot_file()
-        TranslationGenerator(self.all_bundles).generate_all()
+        return self.all_bundles
 
 class TranslationGenerator:
     '''
@@ -178,7 +178,8 @@ class TranslationGenerator:
     additions = {}
     missing = {}
 
-    def __init__(self, all_bundles):
+    def __init__(self, options, all_bundles):
+        self.options = options
         self.all_bundles = all_bundles
 
     def check_missing_keys_in_other_locales(self, source, bundle):
@@ -213,7 +214,7 @@ class TranslationGenerator:
         elif bundle.extension == 'properties':
             parsed_bundle = PropertiesParser(bundle.files).get_as_dictionary()
         else:
-            pass
+            raise(f'{whoami}: Unsupported bundle extension {bundle.extension}')
         snapshot_file = bundle.generate_snapshot_file()
         default_locale = bundle.get_default_locale_file()
         self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
@@ -222,33 +223,26 @@ class TranslationGenerator:
     def generate_all(self):
         for bundle in self.all_bundles:
             self.process_bundle(bundle)
-        Reconciliator().print(self.missing, self.additions)
+        Reconciliator(self.options).print_manifest(self.missing, self.additions)
 
 class Reconciliator:
-    jinja_template = '''
-{%- if missing %}
-missing:
-    {% for key in missing.keys() -%}
-  - locale: {{ key }}
-    {%- for val in missing[key] %}
-        - - {{ val }}
-    {%- endfor -%}
-    {% endfor %}
-{% endif -%}
-{%- if added %}
-added:
-    {% for key in added.keys() -%}
-    - locale: {{ key }}
-    {%- for val in added[key] %}
-        - - {{ val }}
-    {%- endfor -%}
-    {% endfor %}
-{% endif -%}
-    '''
-    def print(self, missing, added):
-        template = jinja2.Environment().from_string(self.jinja_template)
-        data = yaml.full_load(template.render(missing=missing, added=added))
-        print(json.dumps(data, indent=4))
+    data = {}
+
+    def __init__(self, options):
+        self.options = options
+
+    def print_manifest(self, missing, added):
+        for locale, added_strings in added.items():
+            self.data["added"] = self.data.get("added") or []
+            self.data["added"].append({locale: sorted(added_strings)})
+        for locale, missed_strings in missing.items():
+            self.data["missing"] = self.data.get("missing") or []
+            self.data["missing"].append({locale: sorted(missed_strings)})
+
+        if self.options.output == 'json' and self.data:
+            print(json.dumps(self.data, indent=4))
+        elif self.options.output == 'yaml' and self.data:
+            print(yaml.dump(self.data))
 
 class Validator:
     whoami = __qualname__
@@ -286,10 +280,6 @@ class Validator:
 class Utilities:
     def resolve_path(self, path):
         return os.path.realpath(path)
-
-    def dict_to_json(self, dict):
-        values = [{k: v for k, v in dict.items()}]
-        return values
 
 if __name__ == '__main__':
     try:
