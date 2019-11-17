@@ -4,8 +4,6 @@ import sys
 import re
 import yaml
 import json
-import jinja2
-from collections import defaultdict
 
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
@@ -13,7 +11,6 @@ config_file = 'translation-config.yml'
 class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
-        generate = options.generate
         data = self.load_config()
         Validator().validate(data)
         all_bundles = Bundler().gather(data)
