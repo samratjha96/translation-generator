@@ -187,7 +187,7 @@ class TranslationGenerator:
         for file in bundle.keys():
             missing_keys = {}
             candidate_dict = bundle[file]
-            missing_keys = [x for x in source_dict.keys() if x not in candidate_dict.keys()]
+            missing_keys = [f'{key}: {val}' for key, val in source_dict.items() if key not in candidate_dict.keys()]
             if missing_keys:
                 self.missing[file] = missing_keys
 
