@@ -222,15 +222,34 @@ class TranslationGenerator:
     def generate_all(self):
         for bundle in self.all_bundles:
             self.process_bundle(bundle)
-        Reconciliator().apply_template(self.missing, self.additions)
+        Reconciliator().print(self.missing, self.additions)
 
 class Reconciliator:
+    jinja_template = '''
+{%- if missing %}
+missing:
+    {% for key in missing.keys() -%}
+  - locale: {{ key }}
+    {%- for val in missing[key] %}
+        - - {{ val }}
+    {%- endfor -%}
+    {% endfor %}
+{% endif -%}
+{%- if added %}
+added:
+    {% for key in added.keys() -%}
+    - locale: {{ key }}
+    {%- for val in added[key] %}
+        - - {{ val }}
+    {%- endfor -%}
+    {% endfor %}
+{% endif -%}
+    '''
+    def print(self, missing, added):
+        template = jinja2.Environment().from_string(self.jinja_template)
+        data = yaml.full_load(template.render(missing=missing, added=added))
+        print(json.dumps(data, indent=4))
 
-    def apply_template(self, missing, added):
-        with open('./localizer.jinja') as f:
-            template = jinja2.Environment(
-                loader=jinja2.FileSystemLoader('.')).from_string(f.read())
-            print(template.render(missing=missing, added=added))
 class Validator:
     whoami = __qualname__
     def validate(self, data):
