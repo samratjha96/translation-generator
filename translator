@@ -15,7 +15,10 @@ class Driver:
         data = self.load_config()
         Validator().validate(data)
         all_bundles = Bundler().gather(data)
-        TranslationGenerator(options, all_bundles).generate_all()
+        if options.generate:
+            TranslationGenerator(options, all_bundles).generate_all()
+        elif options.reconcile:
+            Reconciliator(options, all_bundles).reconcile()
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -30,7 +33,10 @@ class Driver:
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument('--generate',
-                          help='generate lock file',
+                          help='generate snapshot file',
+                          action='store_true', default=False)
+        mode.add_argument('--reconcile',
+                          help='sanitize locale files',
                           action='store_true', default=False)
         return parser.parse_args(args)
 
@@ -40,10 +46,10 @@ class Driver:
                 data = yaml.full_load(f)
         return data
 
-class JsonParser(object):
+class JsonProcessor(object):
     '''
-        Parser that converts a list of json files into a dictionary representation
-        where the key is the filename itself and the value is the json parsing of the file
+        Processor that can convert json content in files to a python
+        dictionary keyed with the file name
     '''
     files = []
     dict_representation = {}
@@ -61,11 +67,10 @@ class JsonParser(object):
     def get_as_dictionary(self):
         return self.dict_representation
 
-class PropertiesParser(object):
+class PropertiesProcessor(object):
     '''
-        Parser that converts a list of properties files into a dictionary representation
-        where the key is the filename itself and the value is the (key, value) pair representing
-        each entry in the properties file
+        Processor that can convert a properties file to a python
+        dictionary keyed with the file name
     '''
     files = []
     separator = '='
@@ -127,7 +132,7 @@ class Bundle(object):
         else:
             return locale_regex_match[0]
 
-    def generate_snapshot_file(self):
+    def get_snapshot_file(self):
         default_locale_path = self.get_default_locale_file()
         snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
         if not os.path.exists(snapshot_file_path):
@@ -162,12 +167,12 @@ class Bundler:
         for bundle in data.get('bundles'):
             self.parse_bundle(bundle)
         for bundle_obj in self.all_bundles:
-            bundle_obj.generate_snapshot_file()
+            bundle_obj.get_snapshot_file()
         return self.all_bundles
 
 class TranslationGenerator:
     '''
-        This class will accept a list of Bundle objects and apply the necessary parser
+        Accepts a list of Bundle objects and apply the necessary parser
         to generate all the differences between the default_locale, it's corresponding
         snapshot and all the other locales
     '''
@@ -193,7 +198,7 @@ class TranslationGenerator:
         source_dict = bundle[source]
         candidate_dict = bundle[candidate]
         if source_dict != candidate_dict:
-            new_values = [candidate_dict[x] for x in candidate_dict.keys() if candidate_dict[x] not in source_dict.values()]
+            new_values = [f'{key}: {val}' for key, val in candidate_dict.items() if candidate_dict[key] not in source_dict.values()]
             '''
                 TODO: Ignoring the capability to actually make an inplace
                 edit on the default locale file for any key value pair.
@@ -208,11 +213,11 @@ class TranslationGenerator:
     def process_bundle(self, bundle):
         parsed_bundle = None
         if bundle.extension == 'json':
-            parsed_bundle = JsonParser(bundle.files).get_as_dictionary()
+            parsed_bundle = JsonProcessor(bundle.files).get_as_dictionary()
         elif bundle.extension == 'properties':
-            parsed_bundle = PropertiesParser(bundle.files).get_as_dictionary()
+            parsed_bundle = PropertiesProcessor(bundle.files).get_as_dictionary()
 
-        snapshot_file = bundle.generate_snapshot_file()
+        snapshot_file = bundle.get_snapshot_file()
         default_locale = bundle.get_default_locale_file()
         self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
         self.check_missing_keys_in_other_locales(source=snapshot_file, bundle=parsed_bundle)
@@ -220,9 +225,9 @@ class TranslationGenerator:
     def generate_all(self):
         for bundle in self.all_bundles:
             self.process_bundle(bundle)
-        Reconciliator(self.options).print_manifest(self.missing, self.additions)
+        Manifest(self.options).print_manifest(self.missing, self.additions)
 
-class Reconciliator:
+class Manifest:
     data = {}
 
     def __init__(self, options):
@@ -240,6 +245,30 @@ class Reconciliator:
             print(json.dumps(self.data, indent=4))
         elif self.options.output == 'yaml' and self.data:
             print(yaml.dump(self.data))
+
+class Reconciliator:
+    '''
+        Accepts a list of bundle objects and self-heals every
+        file in each bundle with their respective snapshot/default
+        locale files. Intended to be run often to preserve the correct
+        state of all the files
+    '''
+    whoami = __qualname__
+
+    def __init__(self, options, all_bundles):
+        self.options = options
+        self.all_bundles = all_bundles
+
+    def reconcile(self):
+        for bundle in self.all_bundles:
+            self.balance(bundle)
+
+    def balance(self, bundle):
+        snapshot = bundle.get_snapshot_file()
+
+    def alphabetize(self, file):
+        return
+
 
 class Validator:
     whoami = __qualname__
