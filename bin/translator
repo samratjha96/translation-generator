@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+from translations.translator import Driver
+
+if __name__ == '__main__':
+    try:
+        Driver().main()
+    except KeyboardInterrupt:
+        exit(130)

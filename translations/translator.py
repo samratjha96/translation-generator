@@ -393,10 +393,3 @@ class TranslationResponseProcessor(ABC):
     @abstractmethod
     def process_response(self):
         pass
-
-
-if __name__ == '__main__':
-    try:
-        Driver().main()
-    except KeyboardInterrupt:
-        exit(130)
