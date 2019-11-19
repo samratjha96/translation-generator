@@ -26,10 +26,13 @@ bundles:
 
 io-mapping:
   out:
-    - fr_CA: fr
-    - fr_FR: fr
-    - en_GB: ~
+    fr_CA: fr
+    fr_FR: fr
+    en_US: ~
+    en_GB: ~
   in:
-    - fr: fr_CA
-    - fr: fr_FR
-    - __SNAPSHOT__: en_GB
+    fr:
+      - fr_CA
+      - fr_FR
+    __SNAPSHOT__:
+      - en_GB

@@ -1,8 +1,9 @@
 import json
 import os
+import shutil
 
-import yaml
 from openpyxl import Workbook
+
 from translator import TranslationRequestGenerator
 
 
@@ -13,7 +14,6 @@ class Constants:
 
 
 class XlsExporter(TranslationRequestGenerator):
-
     whoami = __qualname__
 
     def __init__(self, config):
@@ -21,52 +21,57 @@ class XlsExporter(TranslationRequestGenerator):
         self.supported_locales = config.get('locales').get('supported')
         self.export_mapping = config.get('io-mapping').get('out')
         self.import_mapping = config.get('io-mapping').get('in')
-        print(json.dumps(self.export_mapping, indent=2))
+        Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
     def generate_request(self, missing, additions):
-        for bundles in additions:
-            for bundle_path in bundles:
-                messages = bundles[bundle_path]
-                for message in messages:
-                    print(f'Processing new message: {message}')
+        target_translations = {}
+        for locale in self.supported_locales:
+            locale_out_target = self.get_locale_out_target(locale)
+            if locale_out_target:
+                print(f'Processing added messages for locale "{locale}" to be included on export "{locale_out_target}"')
+                if locale_out_target in target_translations:
+                    translations = target_translations[locale_out_target]
+                else:
+                    translations = []
+
+                for bundles in additions:
+                    for bundle_path in bundles:
+                        messages = bundles[bundle_path]
+                        for message in messages.values():
+                            if message not in translations:
+                                translations.append(message)
+                target_translations[locale_out_target] = translations
+            else:
+                print(f'Processing added messages for locale "{locale}" was ignored')
+
         for resources in missing:
             for resource_path in resources:
-                locale = Utilities().get_locale_from_path(resource_path, self.supported_locales)
-                messages = resources[resource_path]
-                for message in messages:
-                    print(f'Processing message: {message} in locale {locale}')
+                locale = Utilities.get_locale_from_path(resource_path, self.supported_locales)
+                locale_out_target = self.get_locale_out_target(locale)
+                if locale_out_target:
+                    print(f'Processing missing messages in locale "{locale}" to be included on export "{locale_out_target}"')
+                    if locale_out_target in target_translations:
+                        translations = target_translations[locale_out_target]
+                    else:
+                        translations = []
+                    messages = resources[resource_path]
+                    for message in messages.values():
+                        if message not in translations:
+                            translations.append(message)
+                    target_translations[locale_out_target] = translations
+                else:
+                    print(f'Processing missing messages for locale "{locale}" was ignored')
 
-        # target_translations = {}
-        # for locale in self.supported_locales:
-        #     locale_source = locale['source']
-        #     locale_target = locale['target']
-        #     if locale_target is not None:
-        #         print(f'Processing locale "{locale_source}" to be included on export "{locale_target}"')
-        #         if locale_target in target_translations:
-        #             translations = target_translations[locale_target]
-        #         else:
-        #             translations = []
-        #
-        #         for resource in lock_file_contents['project_i18n_resources'].values():
-        #             pending_translations = resource['pending_translations']
-        #             for new in pending_translations['new'].values():
-        #                 add_translation(translations, new)
-        #             for updated in pending_translations['updated'].values():
-        #                 add_translation(translations, updated)
-        #
-        #             if locale_source in pending_translations['missing']:
-        #                 for missing in pending_translations['missing'][locale_source].values():
-        #                     add_translation(translations, missing)
-        #
-        #         target_translations[locale_target] = translations
-        #     else:
-        #         print(f'Locale "{locale_source}" ignored')
-        #
-        # for target in target_translations:
-        #     print(f'Writing locale "{target}" with "{len(target_translations[target])}" translations')
-        #     write_xls(target, target_translations[target], args.postfix, args.context_col_value)
+        for target in target_translations:
+            print(f'Writing locale "{target}" with "{len(target_translations[target])}" translations')
+            self.write_xls(target, target_translations[target])
 
-    def write_xls(self, locale, translations, postfix, context_col_value):
+    def get_locale_out_target(self, locale):
+        if locale in self.export_mapping:
+            return self.export_mapping[locale]
+        return locale
+
+    def write_xls(self, locale, translations, postfix=None, context_col_value=None):
         workbook = Workbook()
         sheet = workbook.active
 
@@ -85,10 +90,16 @@ class XlsExporter(TranslationRequestGenerator):
 
 
 class Utilities:
-    def get_locale_from_path(self, path, supported_locales):
+    @staticmethod
+    def init_dir(path):
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        os.mkdir(path)
+
+    @staticmethod
+    def get_locale_from_path(path, supported_locales):
         path_wo_extension = path[:path.rfind('.')]
         for locale in supported_locales:
             if path_wo_extension.endswith(locale):
                 return locale
         return None
-
