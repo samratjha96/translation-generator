@@ -1,10 +1,10 @@
-import json
+import datetime
 import os
 import shutil
 
 from openpyxl import Workbook
 
-from translator import TranslationRequestGenerator
+from translator import TranslationRequestGenerator, ConfigUtilities
 
 
 class Constants:
@@ -17,11 +17,12 @@ class XlsExporter(TranslationRequestGenerator):
     whoami = __qualname__
 
     def __init__(self, config):
-        self.default_locale = config.get('locales').get('default')
-        self.supported_locales = config.get('locales').get('supported')
-        self.export_mapping = config.get('io-mapping').get('out')
-        self.import_mapping = config.get('io-mapping').get('in')
-        Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
+        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
+        self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
+        self.out_name = ConfigUtilities.get_value(config, ('io', 'out', 'name'))
+        self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
+        self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
+        IOUtilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
     def generate_request(self, missing, additions):
         target_translations = {}
@@ -46,7 +47,7 @@ class XlsExporter(TranslationRequestGenerator):
 
         for resources in missing:
             for resource_path in resources:
-                locale = Utilities.get_locale_from_path(resource_path, self.supported_locales)
+                locale = IOUtilities.get_locale_from_path(resource_path, self.supported_locales)
                 locale_out_target = self.get_locale_out_target(locale)
                 if locale_out_target:
                     print(f'Processing missing messages in locale "{locale}" to be included on export "{locale_out_target}"')
@@ -65,6 +66,13 @@ class XlsExporter(TranslationRequestGenerator):
         for target in target_translations:
             print(f'Writing locale "{target}" with "{len(target_translations[target])}" translations')
             self.write_xls(target, target_translations[target])
+
+        timestamp = datetime.date.today().strftime('%Y%m%d_%H%M%S')
+        print(f'Starting packaging: Using translations XLS in path "{Constants.DEFAULT_TRANSL_XLS_PATH}"')
+        file_name = shutil.make_archive(Constants.DIST_PATH + self.out_name + '_' + str(timestamp),
+                                        'zip',
+                                        Constants.DEFAULT_TRANSL_XLS_PATH)
+        print(f'Package generated in "{file_name}"')
 
     def get_locale_out_target(self, locale):
         if locale in self.export_mapping:
@@ -89,7 +97,7 @@ class XlsExporter(TranslationRequestGenerator):
         workbook.save(Constants.DEFAULT_TRANSL_XLS_PATH + locale + ('-' + postfix if postfix else '') + '.xls')
 
 
-class Utilities:
+class IOUtilities:
     @staticmethod
     def init_dir(path):
         if os.path.exists(path):

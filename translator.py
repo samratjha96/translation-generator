@@ -11,15 +11,13 @@ from abc import ABC, abstractmethod
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
 
+
 class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         config = self.load_config()
         Validator().validate(config)
-
-        io_module = importlib.import_module('extensions.translator_io')
-        exporter_class = getattr(io_module, 'XlsExporter')
-        exporter = exporter_class(config)
+        exporter = self.instantiate_exporter(config)
         all_bundles = Bundler().gather(config)
         if options.generate:
             TranslationGenerator(options, all_bundles, exporter).generate_all()
@@ -52,6 +50,18 @@ class Driver:
                 data = yaml.full_load(f)
         return data
 
+    def instantiate_exporter(self, config):
+        exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'processor'))
+        exporter_class = self.get_class(exporter_class_fqn)
+        return exporter_class(config)
+
+    def get_class(self, class_fqn):
+        module_name = class_fqn[:class_fqn.rfind('.')]
+        class_name = class_fqn[class_fqn.rfind('.') + 1:]
+        io_module = importlib.import_module(module_name)
+        return getattr(io_module, class_name)
+
+
 class JsonProcessor(object):
     '''
         Processor that can convert json content in files to a python
@@ -71,6 +81,7 @@ class JsonProcessor(object):
     def get_as_dictionary(self):
         self.parse_to_dict(files)
         return self.dict_representation
+
 
 class PropertiesProcessor(object):
     '''
@@ -102,6 +113,7 @@ class PropertiesProcessor(object):
         self.parse_to_dict(self.files)
         return self.dict_representation
 
+
 class Bundle(object):
     whoami = __qualname__
 
@@ -114,7 +126,7 @@ class Bundle(object):
         self.snapshot_file = ''
         self.default_locale_file = ''
         self.bundle_as_dictionary = {}
-        self. missing_items = {}
+        self.missing_items = {}
         self.added_items = {}
 
     def get_default_locale_file(self):
@@ -210,6 +222,7 @@ class Bundle(object):
                 self.added_items[default_locale_file] = new_values
         return self.added_items
 
+
 class Bundler:
     all_bundles = []
 
@@ -217,13 +230,14 @@ class Bundler:
         path = bundle.get('path')
         extension = bundle.get('extension')
         default_locale = bundle.get('default_locale')
-        resolved_path = Utilities().resolve_path(path)
+        resolved_path = Utilities.resolve_path(path)
         all_files_in_bundle_path = []
         for file in os.listdir(resolved_path):
             if file.endswith(extension):
                 file_path = os.path.join(resolved_path, file)
                 all_files_in_bundle_path.append(file_path)
-        bundle_object = Bundle(path=resolved_path, extension=extension, files=all_files_in_bundle_path, default_locale=default_locale)
+        bundle_object = Bundle(path=resolved_path, extension=extension, files=all_files_in_bundle_path,
+                               default_locale=default_locale)
         self.all_bundles.append(bundle_object)
 
     def gather(self, data):
@@ -260,6 +274,7 @@ class TranslationGenerator:
                 self.additions.append(added_items)
         Manifest(self.options).print_manifest(self.missing, self.additions)
         self.exporter.generate_request(self.missing, self.additions)
+
 
 class Manifest:
     data = {}
@@ -307,12 +322,13 @@ class Reconciliator:
 
 class Validator:
     whoami = __qualname__
+
     def validate(self, data):
         ACCEPTED_FILE_TYPES = {'properties', 'json'}
         if data and 'bundles' in data and data.get('bundles'):
             for bundle in data.get('bundles'):
                 self.validate_keys_in_bundle(bundle)
-                path = Utilities().resolve_path(bundle.get('path'))
+                path = Utilities.resolve_path(bundle.get('path'))
                 if not os.path.exists(path):
                     sys.exit(
                         f'{self.whoami}: {path} does not exist'
@@ -332,21 +348,36 @@ class Validator:
             sys.exit(f'{self.whoami}: {config_file} does not have any bundles')
 
     def validate_keys_in_bundle(self, bundle):
-       REQUIRED_KEYS = {'path', 'extension'}
-       if REQUIRED_KEYS - set(bundle.keys()):
-           sys.exit(
-               f'{self.whoami}: bundle configuration must have keys ' +
+        REQUIRED_KEYS = {'path', 'extension'}
+        if REQUIRED_KEYS - set(bundle.keys()):
+            sys.exit(
+                f'{self.whoami}: bundle configuration must have keys ' +
                 ', '.join(sorted(REQUIRED_KEYS)))
 
 
 class Utilities:
-    def resolve_path(self, path):
+    @staticmethod
+    def resolve_path(path):
         return os.path.realpath(path)
+
+
+class ConfigUtilities:
+    @staticmethod
+    def get_value(config, keys):
+        current_val = None
+        for key in keys:
+            current_val = config if current_val is None else current_val
+            print(f'Key: {key}, current: {current_val}')
+            if key in current_val:
+                current_val = current_val.get(key)
+            else:
+                return None
+        return current_val
 
 
 class TranslationRequestGenerator(ABC):
     @abstractmethod
-    def __init__(self,  config):
+    def __init__(self, config):
         pass
 
     @abstractmethod
