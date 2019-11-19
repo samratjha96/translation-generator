@@ -4,7 +4,7 @@ import shutil
 
 from openpyxl import Workbook
 
-from translator import TranslationRequestGenerator, TranslationResponseProcessor, ConfigUtilities
+from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor, ConfigUtilities
 
 
 class Constants:
