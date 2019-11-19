@@ -106,8 +106,17 @@ class Bundle(object):
         self.extension = extension
         self.files = set(files)
         self.default_locale = default_locale or "en_US"
+        # Processing related variables
+        self.snapshot_file = ''
+        self.default_locale_file = ''
+        self.bundle_as_dictionary = {}
+        self. missing_items = {}
+        self.added_items = {}
 
     def get_default_locale_file(self):
+        if self.default_locale_file:
+            return self.default_locale_file
+
         locale_regex_match = []
         for file in self.files:
             '''
@@ -133,6 +142,9 @@ class Bundle(object):
             return locale_regex_match[0]
 
     def get_snapshot_file(self):
+        if self.snapshot_file:
+            return self.snapshot_file
+
         default_locale_path = self.get_default_locale_file()
         snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
         if not os.path.exists(snapshot_file_path):
@@ -147,10 +159,57 @@ class Bundle(object):
             self.files.add(snapshot_file_path)
         return snapshot_file_path
 
+    def convert_to_dictionary(self):
+        if self.bundle_as_dictionary:
+            return self.bundle_as_dictionary
+
+        if self.extension == 'json':
+            self.bundle_as_dictionary = JsonProcessor(self.files).get_as_dictionary()
+        elif self.extension == 'properties':
+            self.bundle_as_dictionary = PropertiesProcessor(self.files).get_as_dictionary()
+        else:
+            sys.exit(
+                f'{self.whoami}: Bundle type of {self.extension} is not one of the supported types')
+        return self.bundle_as_dictionary
+
+    # Find all items that exist in the snapshot but not in a locale file
+    def get_missing_items_in_bundle(self):
+        bundle_as_dictionary = self.convert_to_dictionary()
+        snapshot_file = self.get_snapshot_file()
+        snapshot = bundle_as_dictionary[snapshot_file]
+        for file in bundle_as_dictionary.keys():
+            candidate = bundle_as_dictionary[file]
+            missing = [f'{key}: {val}' for key, val in snapshot.items() if key not in candidate.keys()]
+            if missing:
+                self.missing_items[file] = missing
+        return self.missing_items
+
+    # Find all items that exist in the default locale file but not the snapshot
+    def get_added_items_in_bundle(self):
+        bundle_as_dictionary = self.convert_to_dictionary()
+        snapshot_file = self.get_snapshot_file()
+        snapshot = bundle_as_dictionary[snapshot_file]
+        default_locale_file = self.get_default_locale_file()
+        default = bundle_as_dictionary[default_locale_file]
+
+        if default != snapshot:
+            new_values = [f'{key}: {val}' for key, val in default.items() if default[key] not in snapshot.values()]
+            '''
+                TODO: Ignoring the capability to actually make an inplace
+                edit on the default locale file for any key value pair.
+                With the logic currently implemented, this will show up
+                simply as a "new addition" and the snapshot file will
+                become stale with the old key that was actually "removed"
+                in the default locale file. How do we reconcile this?
+            '''
+            if new_values:
+                self.added_items[default_locale_file] = new_values
+        return self.added_items
+
 class Bundler:
     all_bundles = []
 
-    def parse_bundle(self, bundle):
+    def add_to_all_bundles(self, bundle):
         path = bundle.get('path')
         extension = bundle.get('extension')
         default_locale = bundle.get('default_locale')
@@ -165,7 +224,7 @@ class Bundler:
 
     def gather(self, data):
         for bundle in data.get('bundles'):
-            self.parse_bundle(bundle)
+            self.add_to_all_bundles(bundle)
         for bundle_obj in self.all_bundles:
             bundle_obj.get_snapshot_file()
         return self.all_bundles
@@ -178,53 +237,21 @@ class TranslationGenerator:
     '''
     whoami = __qualname__
     all_bundles = []
-    additions = {}
-    missing = {}
+    additions = []
+    missing = []
 
     def __init__(self, options, all_bundles):
         self.options = options
         self.all_bundles = all_bundles
 
-    def check_missing_keys_in_other_locales(self, source, bundle):
-        source_dict = bundle[source]
-        for file in bundle.keys():
-            missing_keys = {}
-            candidate_dict = bundle[file]
-            missing_keys = [f'{key}: {val}' for key, val in source_dict.items() if key not in candidate_dict.keys()]
-            if missing_keys:
-                self.missing[file] = missing_keys
-
-    def new_entries(self, source, candidate, bundle):
-        source_dict = bundle[source]
-        candidate_dict = bundle[candidate]
-        if source_dict != candidate_dict:
-            new_values = [f'{key}: {val}' for key, val in candidate_dict.items() if candidate_dict[key] not in source_dict.values()]
-            '''
-                TODO: Ignoring the capability to actually make an inplace
-                edit on the default locale file for any key value pair.
-                With the logic currently implemented, this will show up
-                simply as a "new addition" and the snapshot file will
-                become stale with the old key that was actually "removed"
-                in the default locale file. How do we reconcile this?
-            '''
-            if new_values:
-                self.additions[candidate] = new_values
-
-    def process_bundle(self, bundle):
-        parsed_bundle = None
-        if bundle.extension == 'json':
-            parsed_bundle = JsonProcessor(bundle.files).get_as_dictionary()
-        elif bundle.extension == 'properties':
-            parsed_bundle = PropertiesProcessor(bundle.files).get_as_dictionary()
-
-        snapshot_file = bundle.get_snapshot_file()
-        default_locale = bundle.get_default_locale_file()
-        self.new_entries(source=snapshot_file, candidate=default_locale, bundle=parsed_bundle)
-        self.check_missing_keys_in_other_locales(source=snapshot_file, bundle=parsed_bundle)
-
     def generate_all(self):
         for bundle in self.all_bundles:
-            self.process_bundle(bundle)
+            missing_items = bundle.get_missing_items_in_bundle()
+            added_items = bundle.get_added_items_in_bundle()
+            if missing_items:
+                self.missing.append(missing_items)
+            if added_items:
+                self.additions.append(added_items)
         Manifest(self.options).print_manifest(self.missing, self.additions)
 
 class Manifest:
@@ -233,13 +260,13 @@ class Manifest:
     def __init__(self, options):
         self.options = options
 
-    def print_manifest(self, missing, added):
-        for locale, added_strings in added.items():
+    def print_manifest(self, missing, additions):
+        for added in additions:
             self.data["added"] = self.data.get("added") or []
-            self.data["added"].append({locale: sorted(added_strings)})
-        for locale, missed_strings in missing.items():
+            self.data["added"].append(added)
+        for missed in missing:
             self.data["missing"] = self.data.get("missing") or []
-            self.data["missing"].append({locale: sorted(missed_strings)})
+            self.data["missing"].append(missed)
 
         if self.options.output == 'json' and self.data:
             print(json.dumps(self.data, indent=4))
