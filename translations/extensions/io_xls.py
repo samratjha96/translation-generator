@@ -1,15 +1,19 @@
 import datetime
+import glob
 import os
 import shutil
+import sys
+import zipfile
+import pandas as pd
 
 from openpyxl import Workbook
-
 from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor, ConfigUtilities
 
 
 class Constants:
     DEFAULT_TRANSL_XLS_PATH = 'translations-xls/'
     DEFAULT_TRANSL_PKG_NAME = 'translations'
+    WORKING_DIR = 'translations-wrk/'
     DIST_PATH = 'translations-out/'
 
 
@@ -23,7 +27,7 @@ class XlsExporter(TranslationRequestGenerator):
         self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
         IOUtilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
-    def generate_request(self, missing, additions):
+    def generate_request(self, manifest):
         target_translations = {}
         for locale in self.supported_locales:
             locale_out_target = self.get_locale_out_target(locale)
@@ -34,7 +38,7 @@ class XlsExporter(TranslationRequestGenerator):
                 else:
                     translations = []
 
-                for bundles in additions:
+                for bundles in manifest.data.additions:
                     for bundle_path in bundles:
                         messages = bundles[bundle_path]
                         for message in messages.values():
@@ -44,7 +48,7 @@ class XlsExporter(TranslationRequestGenerator):
             else:
                 print(f'Processing added messages for locale "{locale}" was ignored')
 
-        for resources in missing:
+        for resources in manifest.data.missing:
             for resource_path in resources:
                 locale = IOUtilities.get_locale_from_path(resource_path, self.supported_locales)
                 locale_out_target = self.get_locale_out_target(locale)
@@ -102,10 +106,38 @@ class XlsImporter(TranslationResponseProcessor):
     def __init__(self, config):
         self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
+        self.translations_pkg = ConfigUtilities.get_value(config, ('io', 'in', 'package'))
         self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
 
-    def process_response(self):
-        print(f'Processing..')
+    def process_response(self, manifest):
+        self.unzip_excel_files()
+        manifest.print()
+        for missing in manifest.data.get('missing'):
+            print(f'Missing: {missing}')
+
+    def unzip_excel_files(self):
+        try:
+            with zipfile.ZipFile(self.translations_pkg, 'r') as zip_ref:
+                zip_ref.extractall(Constants.WORKING_DIR)
+
+            # Normalize translations provided to CSV files
+            files = glob.glob(Constants.WORKING_DIR + '**/*.xls', recursive=True) + \
+                    glob.glob(Constants.WORKING_DIR + '**/*.xlsx', recursive=True)
+            for file in files:
+                data = pd.read_excel(file)
+                # ToDo: Future enhancement: support the possibility of multiple sources for the same locale
+                data.to_csv(Constants.WORKING_DIR + data.columns[1] + '.csv', encoding='utf-8')
+        except:
+            sys.exit(f'{self.whoami}: Translations ZIP package "{self.translations_pkg}" not found')
+
+    def read_translations_csv(self, csv_file_path, target_locale):
+        translations_dict = {}
+        locale_translations_csv = pd.read_csv(csv_file_path, encoding='utf8')
+        for i in locale_translations_csv.index:
+            translation = locale_translations_csv[target_locale][i]
+            # Source message is located in first column
+            translations_dict[locale_translations_csv[0][i]] = translation
+        return translations_dict
 
 
 class IOUtilities:
