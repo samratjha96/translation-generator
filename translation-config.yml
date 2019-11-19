@@ -35,7 +35,7 @@ io:
       en_GB: ~
   in:
     importer: translations.extensions.io_xls.XlsImporter
-    translations_pkg_path:
+    package: translations-in/translations.zip
     mapping:
       fr:
         - fr_CA

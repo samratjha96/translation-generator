@@ -20,8 +20,12 @@ class Driver:
         exporter = self.instantiate_exporter(config)
         importer = self.instantiate_importer(config)
         all_bundles = Bundler().gather(config)
-        if options.generate:
-            TranslationGenerator(options, all_bundles, exporter).generate_all()
+
+        manifest = TranslationGenerator(options, all_bundles).generate()
+        if options.export:
+            exporter.generate_request(manifest)
+        if options.import_translations:
+            importer.process_response(manifest)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -37,12 +41,19 @@ class Driver:
                             default="yaml")
 
         mode = parser.add_mutually_exclusive_group(required=True)
-        mode.add_argument('--generate',
-                          help='generate snapshot file',
-                          action='store_true', default=False)
+        mode.add_argument('-e', '--export',
+                          help='generate export of pending translations',
+                          action='store_true',
+                          default=False)
+        mode.add_argument('-i', '--import-translations',
+                          dest='import_translations',
+                          help='import translations',
+                          action='store_true',
+                          default=False)
         mode.add_argument('--reconcile',
                           help='sanitize locale files',
-                          action='store_true', default=False)
+                          action='store_true',
+                          default=False)
         return parser.parse_args(args)
 
     def load_config(self):
@@ -267,12 +278,12 @@ class TranslationGenerator:
     additions = []
     missing = []
 
-    def __init__(self, options, all_bundles, exporter):
+    def __init__(self, options, all_bundles):
         self.options = options
         self.all_bundles = all_bundles
-        self.exporter = exporter
 
-    def generate_all(self):
+    def generate(self):
+        manifest = Manifest(self.options)
         for bundle in self.all_bundles:
             missing_items = bundle.get_missing_items_in_bundle()
             added_items = bundle.get_added_items_in_bundle()
@@ -280,8 +291,8 @@ class TranslationGenerator:
                 self.missing.append(missing_items)
             if added_items:
                 self.additions.append(added_items)
-        Manifest(self.options).print_manifest(self.missing, self.additions)
-        self.exporter.generate_request(self.missing, self.additions)
+        manifest.build(self.missing, self.additions)
+        return manifest
 
 
 class Manifest:
@@ -290,7 +301,7 @@ class Manifest:
     def __init__(self, options):
         self.options = options
 
-    def print_manifest(self, missing, additions):
+    def build(self, missing, additions):
         for added in additions:
             self.data["added"] = self.data.get("added") or []
             self.data["added"].append(added)
@@ -298,6 +309,7 @@ class Manifest:
             self.data["missing"] = self.data.get("missing") or []
             self.data["missing"].append(missed)
 
+    def print(self):
         if self.options.output == 'json' and self.data:
             print(json.dumps(self.data, indent=4))
         elif self.options.output == 'yaml' and self.data:
@@ -381,7 +393,7 @@ class TranslationRequestGenerator(ABC):
         pass
 
     @abstractmethod
-    def generate_request(self, missing, additions):
+    def generate_request(self, manifest):
         pass
 
 
@@ -391,5 +403,5 @@ class TranslationResponseProcessor(ABC):
         pass
 
     @abstractmethod
-    def process_response(self):
+    def process_response(self, manifest):
         pass
