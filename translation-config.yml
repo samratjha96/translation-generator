@@ -24,15 +24,20 @@ bundles:
   - path: src/main/resources
     extension: json
 
-io-mapping:
+io:
   out:
-    fr_CA: fr
-    fr_FR: fr
-    en_US: ~
-    en_GB: ~
+    processor: extensions.translator_io.XlsExporter
+    name: translations
+    mapping:
+      fr_CA: fr
+      fr_FR: fr
+      en_US: ~
+      en_GB: ~
   in:
-    fr:
-      - fr_CA
-      - fr_FR
-    __SNAPSHOT__:
-      - en_GB
+    processor: extensions.translator_io.XlsImporter
+    mapping:
+      fr:
+        - fr_CA
+        - fr_FR
+      __SNAPSHOT__:
+        - en_GB
