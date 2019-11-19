@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
 import argparse
+import importlib
 import os
 import sys
 import re
 import yaml
 import json
+
+from abc import ABC, abstractmethod
 
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
@@ -12,11 +14,15 @@ config_file = 'translation-config.yml'
 class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
-        data = self.load_config()
-        Validator().validate(data)
-        all_bundles = Bundler().gather(data)
+        config = self.load_config()
+        Validator().validate(config)
+
+        io_module = importlib.import_module('extensions.translator_io')
+        exporter_class = getattr(io_module, 'XlsExporter')
+        exporter = exporter_class(config)
+        all_bundles = Bundler().gather(config)
         if options.generate:
-            TranslationGenerator(options, all_bundles).generate_all()
+            TranslationGenerator(options, all_bundles, exporter).generate_all()
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -177,7 +183,7 @@ class Bundle(object):
         snapshot = bundle_as_dictionary[snapshot_file]
         for file in bundle_as_dictionary.keys():
             candidate = bundle_as_dictionary[file]
-            missing = [f'{key}: {val}' for key, val in snapshot.items() if key not in candidate.keys()]
+            missing = {key: val for key, val in snapshot.items() if key not in candidate.keys()}
             if missing:
                 self.missing_items[file] = missing
         return self.missing_items
@@ -191,7 +197,7 @@ class Bundle(object):
         default = bundle_as_dictionary[default_locale_file]
 
         if default != snapshot:
-            new_values = [f'{key}: {val}' for key, val in default.items() if default[key] not in snapshot.values()]
+            new_values = {key: val for key, val in default.items() if default[key] not in snapshot.values()}
             '''
                 TODO: Ignoring the capability to actually make an inplace
                 edit on the default locale file for any key value pair.
@@ -227,6 +233,7 @@ class Bundler:
             bundle_obj.get_snapshot_file()
         return self.all_bundles
 
+
 class TranslationGenerator:
     '''
         Accepts a list of Bundle objects and apply the necessary parser
@@ -238,9 +245,10 @@ class TranslationGenerator:
     additions = []
     missing = []
 
-    def __init__(self, options, all_bundles):
+    def __init__(self, options, all_bundles, exporter):
         self.options = options
         self.all_bundles = all_bundles
+        self.exporter = exporter
 
     def generate_all(self):
         for bundle in self.all_bundles:
@@ -251,6 +259,7 @@ class TranslationGenerator:
             if added_items:
                 self.additions.append(added_items)
         Manifest(self.options).print_manifest(self.missing, self.additions)
+        self.exporter.generate_request(self.missing, self.additions)
 
 class Manifest:
     data = {}
@@ -270,6 +279,7 @@ class Manifest:
             print(json.dumps(self.data, indent=4))
         elif self.options.output == 'yaml' and self.data:
             print(yaml.dump(self.data))
+
 
 class Reconciliator:
     '''
@@ -328,9 +338,21 @@ class Validator:
                f'{self.whoami}: bundle configuration must have keys ' +
                 ', '.join(sorted(REQUIRED_KEYS)))
 
+
 class Utilities:
     def resolve_path(self, path):
         return os.path.realpath(path)
+
+
+class TranslationRequestGenerator(ABC):
+    @abstractmethod
+    def __init__(self,  config):
+        pass
+
+    @abstractmethod
+    def generate_request(self, missing, additions):
+        pass
+
 
 if __name__ == '__main__':
     try:

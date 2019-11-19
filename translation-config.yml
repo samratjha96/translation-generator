@@ -1,6 +1,35 @@
+locales:
+  default: en_US
+  supported:
+    - ar
+    - de
+    - en_GB
+    - es
+    - fr_CA
+    - fr_FR
+    - it
+    - ja
+    - nl
+    - pl
+    - pt
+    - ru
+    - sv
+    - zh_CN
+    - zh_HK
+
 bundles:
   - path: .
     extension: properties
     default_locale: en_US
   - path: src/main/resources
     extension: json
+
+io-mapping:
+  out:
+    - fr_CA: fr
+    - fr_FR: fr
+    - en_GB: ~
+  in:
+    - fr: fr_CA
+    - fr: fr_FR
+    - __SNAPSHOT__: en_GB
