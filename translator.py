@@ -18,6 +18,7 @@ class Driver:
         config = self.load_config()
         Validator().validate(config)
         exporter = self.instantiate_exporter(config)
+        importer = self.instantiate_importer(config)
         all_bundles = Bundler().gather(config)
         if options.generate:
             TranslationGenerator(options, all_bundles, exporter).generate_all()
@@ -51,9 +52,14 @@ class Driver:
         return data
 
     def instantiate_exporter(self, config):
-        exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'processor'))
+        exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'generator'))
         exporter_class = self.get_class(exporter_class_fqn)
         return exporter_class(config)
+
+    def instantiate_importer(self, config):
+        importer_class_fqn = ConfigUtilities.get_value(config, ('io', 'in', 'importer'))
+        importer_class = self.get_class(importer_class_fqn)
+        return importer_class(config)
 
     def get_class(self, class_fqn):
         module_name = class_fqn[:class_fqn.rfind('.')]
@@ -364,15 +370,7 @@ class Utilities:
 class ConfigUtilities:
     @staticmethod
     def get_value(config, keys):
-        current_val = None
-        for key in keys:
-            current_val = config if current_val is None else current_val
-            print(f'Key: {key}, current: {current_val}')
-            if key in current_val:
-                current_val = current_val.get(key)
-            else:
-                return None
-        return current_val
+        return ConfigUtilities.get_value(config[keys[0]], keys[1:]) if keys else config
 
 
 class TranslationRequestGenerator(ABC):
@@ -382,6 +380,16 @@ class TranslationRequestGenerator(ABC):
 
     @abstractmethod
     def generate_request(self, missing, additions):
+        pass
+
+
+class TranslationResponseProcessor(ABC):
+    @abstractmethod
+    def __init__(self, config):
+        pass
+
+    @abstractmethod
+    def process_response(self):
         pass
 
 

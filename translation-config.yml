@@ -26,7 +26,7 @@ bundles:
 
 io:
   out:
-    processor: extensions.translator_io.XlsExporter
+    generator: extensions.translator_io.XlsExporter
     name: translations
     mapping:
       fr_CA: fr
@@ -34,7 +34,8 @@ io:
       en_US: ~
       en_GB: ~
   in:
-    processor: extensions.translator_io.XlsImporter
+    importer: extensions.translator_io.XlsImporter
+    translations_pkg_path:
     mapping:
       fr:
         - fr_CA

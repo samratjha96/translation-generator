@@ -4,7 +4,7 @@ import shutil
 
 from openpyxl import Workbook
 
-from translator import TranslationRequestGenerator, ConfigUtilities
+from translator import TranslationRequestGenerator, TranslationResponseProcessor, ConfigUtilities
 
 
 class Constants:
@@ -21,7 +21,6 @@ class XlsExporter(TranslationRequestGenerator):
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
         self.out_name = ConfigUtilities.get_value(config, ('io', 'out', 'name'))
         self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
-        self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
         IOUtilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
     def generate_request(self, missing, additions):
@@ -95,6 +94,18 @@ class XlsExporter(TranslationRequestGenerator):
             row += 1
 
         workbook.save(Constants.DEFAULT_TRANSL_XLS_PATH + locale + ('-' + postfix if postfix else '') + '.xls')
+
+
+class XlsImporter(TranslationResponseProcessor):
+    whoami = __qualname__
+
+    def __init__(self, config):
+        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
+        self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
+        self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
+
+    def process_response(self):
+        print(f'Processing..')
 
 
 class IOUtilities:
