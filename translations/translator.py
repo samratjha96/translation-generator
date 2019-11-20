@@ -27,7 +27,7 @@ class Driver:
         if options.export:
             exporter.generate_request(manifest)
         if options.import_translations:
-            importer.process_response(manifest)
+            translation_updates = importer.process_response(manifest)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 

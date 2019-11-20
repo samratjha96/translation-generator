@@ -26,6 +26,14 @@ class Utilities:
                 return locale
         return None
 
+    @staticmethod
+    def replace_locale_in_path(path, old_locale, new_locale):
+        if path.find(old_locale):
+            first, sep, last = path.rpartition(old_locale)
+            return first + new_locale + last
+        first, sep, last = path.rpartition('.')
+        return first + '_' + new_locale + '.' + last
+
 
 class ConfigUtilities:
     @staticmethod

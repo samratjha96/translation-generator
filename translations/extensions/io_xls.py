@@ -119,25 +119,43 @@ class XlsImporter(TranslationResponseProcessor):
                 expected_locales.append(inbound_locale)
         return expected_locales
 
+    def determine_inbound_locale(self, supported_locale):
+        for inbound_locale, mapped_locales in self.import_mapping.items():
+            for mapped_locale in mapped_locales:
+                if mapped_locale == supported_locale:
+                    return inbound_locale
+        return supported_locale
+
     def process_response(self, manifest):
-        translated_manifest = manifest.copy()
+        import_manifest = {}
         translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
                                                                          self.default_locale,
                                                                          self.expected_locales)
-        for resource in translated_manifest.get('missing'):
+        for resource in manifest.data.get('missing'):
             for path, messages in resource.items():
                 locale = Utilities.get_locale_from_path(path, self.supported_locales)
                 locale_translations = translations.get(locale)
                 if locale_translations is not None:
                     for key, message in messages.items():
                         translation = locale_translations.get(message)
-                        messages[key] = translation
-                        print(f'Found translation for "{message}" in locale "{locale}" = {translation}')
-
-        Utilities.print_data(translated_manifest)
-        # for resource in manifest.data.get('added'):
-        #     locale = Utilities.get_locale_from_path(resource)
-        #     print(f'Processing Missing {locale}')
+                        if path not in import_manifest:
+                            import_manifest[path] = {}
+                        import_manifest[path][key] = translation
+        for resource in manifest.data.get('added'):
+            for path, messages in resource.items():
+                source_locale = Utilities.get_locale_from_path(path, self.supported_locales)
+                if source_locale == self.default_locale:
+                    for locale in self.supported_locales:
+                        inbound_locale = self.determine_inbound_locale(locale)
+                        locale_translations = translations.get(inbound_locale)
+                        if locale_translations is not None:
+                            locale_resources_path = Utilities.replace_locale_in_path(source_locale, locale)
+                            for key, message in messages.items():
+                                translation = locale_translations.get(message)
+                                if locale_resources_path not in import_manifest:
+                                    import_manifest[locale_resources_path] = {}
+                                import_manifest[locale_resources_path][key] = translation
+        return import_manifest
 
 
 class XlsTranslationsProcessor:
