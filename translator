@@ -51,12 +51,10 @@ class JsonProcessor(object):
         Processor that can convert json content in files to a python
         dictionary keyed with the file name
     '''
-    files = []
-    dict_representation = {}
 
     def __init__(self, files):
         self.files = set(files)
-        self.parse_to_dict(files)
+        self.dict_representation = {}
 
     def parse_to_dict(self, files):
         for file in files:
@@ -65,6 +63,7 @@ class JsonProcessor(object):
             self.dict_representation[file] = dictdump
 
     def get_as_dictionary(self):
+        self.parse_to_dict(files)
         return self.dict_representation
 
 class PropertiesProcessor(object):
@@ -72,14 +71,12 @@ class PropertiesProcessor(object):
         Processor that can convert a properties file to a python
         dictionary keyed with the file name
     '''
-    files = []
     separator = '='
     comment_char='#'
-    dict_representation = {}
 
     def __init__(self, files):
         self.files = set(files)
-        self.parse_to_dict(self.files)
+        self.dict_representation = {}
 
     def parse_to_dict(self, files):
         for file in files:
@@ -96,6 +93,7 @@ class PropertiesProcessor(object):
             self.dict_representation[file] = current_file_key_val
 
     def get_as_dictionary(self):
+        self.parse_to_dict(self.files)
         return self.dict_representation
 
 class Bundle(object):
