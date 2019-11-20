@@ -1,13 +1,13 @@
 import datetime
 import glob
-import os
 import shutil
 import sys
 import zipfile
 import pandas as pd
 
 from openpyxl import Workbook
-from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor, ConfigUtilities
+from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor
+from translations.utils import ConfigUtilities, Utilities
 
 
 class Constants:
@@ -15,6 +15,7 @@ class Constants:
     DEFAULT_TRANSL_PKG_NAME = 'translations'
     WORKING_DIR = 'translations-wrk/'
     DIST_PATH = 'translations-out/'
+    SNAPSHOT_SENTINEL = '__SNAPSHOT__'
 
 
 class XlsExporter(TranslationRequestGenerator):
@@ -25,7 +26,7 @@ class XlsExporter(TranslationRequestGenerator):
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
         self.out_name = ConfigUtilities.get_value(config, ('io', 'out', 'name'))
         self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
-        IOUtilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
+        Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
     def generate_request(self, manifest):
         target_translations = {}
@@ -50,7 +51,7 @@ class XlsExporter(TranslationRequestGenerator):
 
         for resources in manifest.data.missing:
             for resource_path in resources:
-                locale = IOUtilities.get_locale_from_path(resource_path, self.supported_locales)
+                locale = Utilities.get_locale_from_path(resource_path, self.supported_locales)
                 locale_out_target = self.get_locale_out_target(locale)
                 if locale_out_target:
                     print(f'Processing missing messages in locale "{locale}" to be included on export "{locale_out_target}"')
@@ -108,49 +109,53 @@ class XlsImporter(TranslationResponseProcessor):
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
         self.translations_pkg = ConfigUtilities.get_value(config, ('io', 'in', 'package'))
         self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
+        self.expected_locales = self.determine_expected_locales()
+
+    def determine_expected_locales(self):
+        expected_locales = self.supported_locales.copy()
+        for inbound_locale, mapped_locales in self.import_mapping.items():
+            expected_locales = [locale for locale in expected_locales if locale not in mapped_locales]
+            if inbound_locale not in expected_locales and inbound_locale != Constants.SNAPSHOT_SENTINEL:
+                expected_locales.append(inbound_locale)
+        print(expected_locales)
+        return expected_locales
 
     def process_response(self, manifest):
-        self.unzip_excel_files()
-        manifest.print()
-        for missing in manifest.data.get('missing'):
-            print(f'Missing: {missing}')
+        translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
+                                                                         self.default_locale,
+                                                                         self.expected_locales)
+        Utilities.print_data(translations)
+        # for missing in manifest.data.get('missing'):
+        #     print(f'Missing: {missing}')
 
-    def unzip_excel_files(self):
+
+class XlsTranslationsProcessor:
+    @staticmethod
+    def get_inbound_translations(translations_pkg, source_locale, locales):
+        translations = {}
         try:
-            with zipfile.ZipFile(self.translations_pkg, 'r') as zip_ref:
+            with zipfile.ZipFile(translations_pkg, 'r') as zip_ref:
                 zip_ref.extractall(Constants.WORKING_DIR)
-
-            # Normalize translations provided to CSV files
-            files = glob.glob(Constants.WORKING_DIR + '**/*.xls', recursive=True) + \
-                    glob.glob(Constants.WORKING_DIR + '**/*.xlsx', recursive=True)
-            for file in files:
-                data = pd.read_excel(file)
-                # ToDo: Future enhancement: support the possibility of multiple sources for the same locale
-                data.to_csv(Constants.WORKING_DIR + data.columns[1] + '.csv', encoding='utf-8')
         except:
-            sys.exit(f'{self.whoami}: Translations ZIP package "{self.translations_pkg}" not found')
+            sys.exit(f'Translations ZIP package "{translations_pkg}" not found')
 
-    def read_translations_csv(self, csv_file_path, target_locale):
-        translations_dict = {}
-        locale_translations_csv = pd.read_csv(csv_file_path, encoding='utf8')
-        for i in locale_translations_csv.index:
-            translation = locale_translations_csv[target_locale][i]
-            # Source message is located in first column
-            translations_dict[locale_translations_csv[0][i]] = translation
-        return translations_dict
+        files = glob.glob(Constants.WORKING_DIR + '**/*.xls', recursive=True) + \
+                glob.glob(Constants.WORKING_DIR + '**/*.xlsx', recursive=True)
+        for file in files:
+            locale = Utilities.get_locale_from_path(file, locales)
+            print(f'Processing translations for {locale}, from {source_locale}, in file {file}')
+            translations_data = pd.read_excel(file)
+            # Validate
+            if translations_data[source_locale] is None:
+                print(f'Translations in "{file}" does not have a dedicated column for source locale "{source_locale}')
+            if translations_data[locale] is None:
+                print(f'Translations in "{file}" does not have a dedicated column for locale "{locale}')
 
+            if locale not in translations:
+                translations[locale] = {}
+            for i in translations_data.index:
+                message = translations_data[source_locale][i]
+                translation = translations_data[locale][i]
+                translations[locale][message] = translation
 
-class IOUtilities:
-    @staticmethod
-    def init_dir(path):
-        if os.path.exists(path):
-            shutil.rmtree(path)
-        os.mkdir(path)
-
-    @staticmethod
-    def get_locale_from_path(path, supported_locales):
-        path_wo_extension = path[:path.rfind('.')]
-        for locale in supported_locales:
-            if path_wo_extension.endswith(locale):
-                return locale
-        return None
+        return translations

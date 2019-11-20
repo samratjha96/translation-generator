@@ -8,6 +8,8 @@ import json
 
 from abc import ABC, abstractmethod
 
+from translations.utils import Utilities, ConfigUtilities
+
 program = os.path.basename(sys.argv[0])
 config_file = 'translation-config.yml'
 
@@ -106,7 +108,7 @@ class PropertiesProcessor(object):
         dictionary keyed with the file name
     '''
     separator = '='
-    comment_char='#'
+    comment_char = '#'
 
     def __init__(self, files):
         self.files = set(files)
@@ -371,18 +373,6 @@ class Validator:
             sys.exit(
                 f'{self.whoami}: bundle configuration must have keys ' +
                 ', '.join(sorted(REQUIRED_KEYS)))
-
-
-class Utilities:
-    @staticmethod
-    def resolve_path(path):
-        return os.path.realpath(path)
-
-
-class ConfigUtilities:
-    @staticmethod
-    def get_value(config, keys):
-        return ConfigUtilities.get_value(config[keys[0]], keys[1:]) if keys else config
 
 
 class TranslationRequestGenerator(ABC):
