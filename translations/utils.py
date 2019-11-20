@@ -34,6 +34,10 @@ class Utilities:
         first, sep, last = path.rpartition('.')
         return first + '_' + new_locale + '.' + last
 
+    @staticmethod
+    def get_unicode_markup(content):
+        return content.encode('unicode-escape').decode('utf-8').replace('\\x', '\\u00')
+
 
 class ConfigUtilities:
     @staticmethod

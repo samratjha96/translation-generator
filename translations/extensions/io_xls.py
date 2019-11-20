@@ -142,14 +142,14 @@ class XlsImporter(TranslationResponseProcessor):
                             import_manifest[path] = {}
                         import_manifest[path][key] = translation
         for resource in manifest.data.get('added'):
-            for path, messages in resource.items():
-                source_locale = Utilities.get_locale_from_path(path, self.supported_locales)
-                if source_locale == self.default_locale:
+            for source_path, messages in resource.items():
+                source_locale = Utilities.get_locale_from_path(source_path, [self.default_locale])
+                if source_locale:
                     for locale in self.supported_locales:
                         inbound_locale = self.determine_inbound_locale(locale)
                         locale_translations = translations.get(inbound_locale)
-                        if locale_translations is not None:
-                            locale_resources_path = Utilities.replace_locale_in_path(source_locale, locale)
+                        if locale_translations is not None and locale_translations != Constants.SNAPSHOT_SENTINEL:
+                            locale_resources_path = Utilities.replace_locale_in_path(source_path, source_locale, locale)
                             for key, message in messages.items():
                                 translation = locale_translations.get(message)
                                 if locale_resources_path not in import_manifest:

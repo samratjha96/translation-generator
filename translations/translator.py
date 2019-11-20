@@ -28,6 +28,7 @@ class Driver:
             exporter.generate_request(manifest)
         if options.import_translations:
             translation_updates = importer.process_response(manifest)
+            TranslationUpdater.update(translation_updates)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -93,9 +94,7 @@ class JsonProcessor(object):
 
     def parse_to_dict(self, files):
         for file in files:
-            with open(file) as f:
-                dictdump = json.loads(f.read())
-            self.dict_representation[file] = dictdump
+            self.dict_representation[file] = ResourceFileHandler.read_json(file)
 
     def get_as_dictionary(self):
         self.parse_to_dict(self.files)
@@ -116,21 +115,71 @@ class PropertiesProcessor(object):
 
     def parse_to_dict(self, files):
         for file in files:
-            current_file_key_val = {}
-            with open(file, "rt") as f:
-                for line in f:
-                    l = line.strip()
-                    if l and not l.startswith(self.comment_char):
-                        key_value_split = l.split(self.separator)
-                        key = key_value_split[0].strip()
-                        value = self.separator.join(key_value_split[1:]).strip().strip('"')
-                        if value:
-                            current_file_key_val[key] = value
-            self.dict_representation[file] = current_file_key_val
+            self.dict_representation[file] = ResourceFileHandler.read_properties(file)
 
     def get_as_dictionary(self):
         self.parse_to_dict(self.files)
         return self.dict_representation
+
+
+class ResourceFileHandler:
+
+    @staticmethod
+    def read(resource_path):
+        extension = resource_path[resource_path.rfind('.') + 1:]
+        if extension == 'properties':
+            return ResourceFileHandler.read_properties(resource_path)
+        elif extension == 'json':
+            return ResourceFileHandler.read_json(resource_path)
+        print(f'Unsupported resource extension: {extension}')
+        return {}
+
+    @staticmethod
+    def read_properties(resource_path):
+        separator = '='
+        comment_char = '#'
+
+        current_file_key_val = {}
+        with open(resource_path, "rt") as f:
+            for line in f:
+                l = line.strip()
+                if l and not l.startswith(comment_char):
+                    key_value_split = l.split(separator)
+                    key = key_value_split[0].strip()
+                    value = separator.join(key_value_split[1:]).strip().strip('"')
+                    if value:
+                        current_file_key_val[key] = value.encode('utf-8').decode('unicode-escape')
+        return current_file_key_val
+
+    @staticmethod
+    def read_json(resource_path):
+        with open(resource_path) as f:
+            dictdump = json.loads(f.read())
+        return dictdump
+
+    @staticmethod
+    def write(resource_path, translations):
+        extension = resource_path[resource_path.rfind('.') + 1:]
+        if extension == 'properties':
+            ResourceFileHandler.write_properties(resource_path, translations)
+        elif extension == 'json':
+            ResourceFileHandler.write_json(resource_path, translations)
+        else:
+            print(f'Unsupported resource extension: {extension}')
+
+    @staticmethod
+    def write_properties(resource_path, translations):
+        with open(resource_path, encoding='utf-8', mode='w') as outfile:
+            for key in translations.keys():
+                line = key + '=' + Utilities.get_unicode_markup(translations[key])
+                outfile.write(line)
+                outfile.write('\n')
+
+    @staticmethod
+    def write_json(resource_path, translations):
+        with open(resource_path, 'w') as outfile:
+            json.dump(translations, outfile, ensure_ascii=False, indent=2)
+            outfile.write('\n')
 
 
 class Bundle(object):
@@ -293,6 +342,19 @@ class TranslationGenerator:
                 self.additions.append(added_items)
         manifest.build(self.missing, self.additions)
         return manifest
+
+
+class TranslationUpdater:
+    whoami = __qualname__
+
+    @staticmethod
+    def update(translations):
+        for resource_path, translations in translations.items():
+            resource_translations = ResourceFileHandler.read(resource_path)
+            for key, translation in translations.items():
+                if translation is not None:
+                    resource_translations[key] = translation
+            ResourceFileHandler.write(resource_path, resource_translations)
 
 
 class Manifest:
