@@ -117,16 +117,27 @@ class XlsImporter(TranslationResponseProcessor):
             expected_locales = [locale for locale in expected_locales if locale not in mapped_locales]
             if inbound_locale not in expected_locales and inbound_locale != Constants.SNAPSHOT_SENTINEL:
                 expected_locales.append(inbound_locale)
-        print(expected_locales)
         return expected_locales
 
     def process_response(self, manifest):
+        translated_manifest = manifest.copy()
         translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
                                                                          self.default_locale,
                                                                          self.expected_locales)
-        Utilities.print_data(translations)
-        # for missing in manifest.data.get('missing'):
-        #     print(f'Missing: {missing}')
+        for resource in translated_manifest.get('missing'):
+            for path, messages in resource.items():
+                locale = Utilities.get_locale_from_path(path, self.supported_locales)
+                locale_translations = translations.get(locale)
+                if locale_translations is not None:
+                    for key, message in messages.items():
+                        translation = locale_translations.get(message)
+                        messages[key] = translation
+                        print(f'Found translation for "{message}" in locale "{locale}" = {translation}')
+
+        Utilities.print_data(translated_manifest)
+        # for resource in manifest.data.get('added'):
+        #     locale = Utilities.get_locale_from_path(resource)
+        #     print(f'Processing Missing {locale}')
 
 
 class XlsTranslationsProcessor:

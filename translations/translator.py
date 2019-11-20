@@ -315,6 +315,9 @@ class Manifest:
         elif self.options.output == 'yaml' and self.data:
             print(yaml.dump(self.data))
 
+    def copy(self):
+        return self.data.copy()
+
 
 class Reconciliator:
     '''
