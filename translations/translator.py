@@ -96,7 +96,7 @@ class JsonProcessor(object):
             self.dict_representation[file] = dictdump
 
     def get_as_dictionary(self):
-        self.parse_to_dict(files)
+        self.parse_to_dict(self.files)
         return self.dict_representation
 
 
