@@ -26,6 +26,8 @@ class Driver:
         all_bundles = Bundler().gather(config)
 
         manifest = TranslationGenerator(options, all_bundles).generate()
+        if options.view:
+            Utilities.print_data(manifest.data)
         if options.export:
             exporter.generate_request(manifest)
         if options.import_translations:
@@ -54,6 +56,10 @@ class Driver:
                             default=False)
 
         mode = parser.add_mutually_exclusive_group(required=True)
+        mode.add_argument('-v', '--view',
+                          help='view translations state',
+                          action='store_true',
+                          default=False)
         mode.add_argument('-e', '--export',
                           help='generate export of pending translations',
                           action='store_true',
