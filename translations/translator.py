@@ -15,12 +15,14 @@ config_file = 'translation-config.yml'
 
 
 class Driver:
+    whoami = __qualname__
+
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         config = self.load_config()
         Validator().validate(config)
-        exporter = self.instantiate_exporter(config)
-        importer = self.instantiate_importer(config)
+        exporter = self.instantiate_exporter(config, options)
+        importer = self.instantiate_importer(config, options)
         all_bundles = Bundler().gather(config)
 
         manifest = TranslationGenerator(options, all_bundles).generate()
@@ -30,6 +32,8 @@ class Driver:
             translation_updates, new_messages = importer.process_response(manifest)
             TranslationUpdater.update(translation_updates)
             SnapshotUpdater(config).update(manifest, new_messages)
+            Utilities.write_to_json_file('translations-manifest', manifest.data)
+            Utilities.write_to_json_file('translations-updates', translation_updates)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -43,6 +47,11 @@ class Driver:
                             help='output type',
                             choices=("yaml", "json"),
                             default="yaml")
+
+        parser.add_argument('-d', '--dump',
+                            help='enable process to dump output files providing information about the execution',
+                            action='store_true',
+                            default=False)
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument('-e', '--export',
@@ -61,20 +70,21 @@ class Driver:
         return parser.parse_args(args)
 
     def load_config(self):
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
-                data = yaml.full_load(f)
+        if not os.path.exists(config_file):
+            sys.exit(f'{self.whoami}: configuration file "{config_file}" not found')
+        with open(config_file, 'r') as f:
+            data = yaml.full_load(f)
         return data
 
-    def instantiate_exporter(self, config):
+    def instantiate_exporter(self, config, options):
         exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'generator'))
         exporter_class = self.get_class(exporter_class_fqn)
-        return exporter_class(config)
+        return exporter_class(config, options)
 
-    def instantiate_importer(self, config):
+    def instantiate_importer(self, config, options):
         importer_class_fqn = ConfigUtilities.get_value(config, ('io', 'in', 'importer'))
         importer_class = self.get_class(importer_class_fqn)
-        return importer_class(config)
+        return importer_class(config, options)
 
     def get_class(self, class_fqn):
         module_name = class_fqn[:class_fqn.rfind('.')]
@@ -495,7 +505,7 @@ class Validator:
 
 class TranslationRequestGenerator(ABC):
     @abstractmethod
-    def __init__(self, config):
+    def __init__(self, config, options):
         pass
 
     @abstractmethod
@@ -505,7 +515,7 @@ class TranslationRequestGenerator(ABC):
 
 class TranslationResponseProcessor(ABC):
     @abstractmethod
-    def __init__(self, config):
+    def __init__(self, config, options):
         pass
 
     @abstractmethod

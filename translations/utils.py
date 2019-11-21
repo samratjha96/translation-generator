@@ -38,6 +38,12 @@ class Utilities:
     def get_unicode_markup(content):
         return content.encode('unicode-escape').decode('utf-8').replace('\\x', '\\u00')
 
+    @staticmethod
+    def write_to_json_file(name, content):
+        with open(name + '.json', 'w') as outfile:
+            json.dump(content, outfile, ensure_ascii=False, indent=2)
+            outfile.write('\n')
+
 
 class ConfigUtilities:
     @staticmethod

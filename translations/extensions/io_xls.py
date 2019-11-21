@@ -20,11 +20,12 @@ class Constants:
 class XlsExporter(TranslationRequestGenerator):
     whoami = __qualname__
 
-    def __init__(self, config):
+    def __init__(self, config, options):
         self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
         self.out_name = ConfigUtilities.get_value(config, ('io', 'out', 'name'))
         self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
+        self.options = options
         Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
     def generate_request(self, manifest):
@@ -103,12 +104,13 @@ class XlsExporter(TranslationRequestGenerator):
 class XlsImporter(TranslationResponseProcessor):
     whoami = __qualname__
 
-    def __init__(self, config):
+    def __init__(self, config, options):
         self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
         self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
         self.translations_pkg = ConfigUtilities.get_value(config, ('io', 'in', 'package'))
         self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
         self.expected_locales = self.determine_expected_locales()
+        self.options = options
 
     def determine_expected_locales(self):
         expected_locales = self.supported_locales.copy()
@@ -133,11 +135,15 @@ class XlsImporter(TranslationResponseProcessor):
         translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
                                                                          self.default_locale,
                                                                          self.expected_locales)
+        if self.options.dump:
+            Utilities.write_to_json_file('translations-raw', translations)
+
         if missing:
             for resource in missing:
                 for path, messages in resource.items():
                     locale = Utilities.get_locale_from_path(path, self.supported_locales)
-                    locale_translations = translations.get(locale)
+                    inbound_locale = self.determine_inbound_locale(locale)
+                    locale_translations = translations.get(inbound_locale)
                     if locale_translations is not None:
                         for key, message in messages.items():
                             translation = locale_translations.get(message)
@@ -164,6 +170,10 @@ class XlsImporter(TranslationResponseProcessor):
                                     if source_path not in new_messages:
                                         new_messages[source_path] = {}
                                     new_messages[source_path][key] = message
+
+        if self.options.dump:
+            Utilities.write_to_json_file('translations-manifest', import_manifest)
+            Utilities.write_to_json_file('translations-new-messages', new_messages)
         return import_manifest, new_messages
 
 
