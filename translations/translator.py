@@ -27,8 +27,9 @@ class Driver:
         if options.export:
             exporter.generate_request(manifest)
         if options.import_translations:
-            translation_updates = importer.process_response(manifest)
+            translation_updates, new_messages = importer.process_response(manifest)
             TranslationUpdater.update(translation_updates)
+            SnapshotUpdater.update(manifest, new_messages)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -131,6 +132,20 @@ class ResourceFileHandler:
             return ResourceFileHandler.read_properties(resource_path)
         elif extension == 'json':
             return ResourceFileHandler.read_json(resource_path)
+        elif extension == 'snapshot':
+            return ResourceFileHandler.read(resource_path[:resource_path.rfind('.')])
+
+        print(f'Unsupported resource extension: {extension}')
+        return {}
+
+    @staticmethod
+    def read_snapshot(snapshot_path):
+        orig_source = snapshot_path[:snapshot_path.rfind('.')]
+        extension = orig_source[orig_source.rfind('.') + 1:]
+        if extension == 'properties':
+            return ResourceFileHandler.read_properties(snapshot_path)
+        elif extension == 'json':
+            return ResourceFileHandler.read_json(snapshot_path)
         print(f'Unsupported resource extension: {extension}')
         return {}
 
@@ -168,17 +183,29 @@ class ResourceFileHandler:
             print(f'Unsupported resource extension: {extension}')
 
     @staticmethod
-    def write_properties(resource_path, translations):
+    def write_snapshot(snapshot_path, messages):
+        orig_source = snapshot_path[:snapshot_path.rfind('.')]
+        extension = orig_source[orig_source.rfind('.') + 1:]
+        if extension == 'properties':
+            ResourceFileHandler.write_properties(snapshot_path, messages)
+        elif extension == 'json':
+            ResourceFileHandler.write_json(snapshot_path, messages)
+        else:
+            print(f'Unsupported resource extension: {extension}')
+        return {}
+
+    @staticmethod
+    def write_properties(resource_path, messages):
         with open(resource_path, encoding='utf-8', mode='w') as outfile:
-            for key in translations.keys():
-                line = key + '=' + Utilities.get_unicode_markup(translations[key])
+            for key in messages.keys():
+                line = key + '=' + Utilities.get_unicode_markup(messages[key])
                 outfile.write(line)
                 outfile.write('\n')
 
     @staticmethod
-    def write_json(resource_path, translations):
+    def write_json(resource_path, messages):
         with open(resource_path, 'w') as outfile:
-            json.dump(translations, outfile, ensure_ascii=False, indent=2)
+            json.dump(messages, outfile, ensure_ascii=False, indent=2)
             outfile.write('\n')
 
 
@@ -355,6 +382,25 @@ class TranslationUpdater:
                 if translation is not None:
                     resource_translations[key] = translation
             ResourceFileHandler.write(resource_path, resource_translations)
+
+
+class SnapshotUpdater:
+    whoami = __qualname__
+
+    @staticmethod
+    def update(manifest, new_messages):
+        Utilities.print_data(new_messages)
+        added = manifest.data.get('added')
+        if added:
+            for resource in added:
+                for source_path, messages in resource.items():
+                    if source_path in new_messages.keys():
+                        source_new_messages = new_messages[source_path]
+                        snapshot_path = source_path + '.snapshot'
+                        snapshot = ResourceFileHandler.read_snapshot(snapshot_path)
+                        for key, message in source_new_messages.items():
+                            snapshot[key] = message
+                        ResourceFileHandler.write_snapshot(snapshot_path, snapshot)
 
 
 class Manifest:

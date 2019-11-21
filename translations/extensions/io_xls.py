@@ -128,34 +128,44 @@ class XlsImporter(TranslationResponseProcessor):
 
     def process_response(self, manifest):
         import_manifest = {}
+        new_messages = {}
+        missing = manifest.data.get('missing')
+        added = manifest.data.get('added')
         translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
                                                                          self.default_locale,
                                                                          self.expected_locales)
-        for resource in manifest.data.get('missing'):
-            for path, messages in resource.items():
-                locale = Utilities.get_locale_from_path(path, self.supported_locales)
-                locale_translations = translations.get(locale)
-                if locale_translations is not None:
-                    for key, message in messages.items():
-                        translation = locale_translations.get(message)
-                        if path not in import_manifest:
-                            import_manifest[path] = {}
-                        import_manifest[path][key] = translation
-        for resource in manifest.data.get('added'):
-            for source_path, messages in resource.items():
-                source_locale = Utilities.get_locale_from_path(source_path, [self.default_locale])
-                if source_locale:
-                    for locale in self.supported_locales:
-                        inbound_locale = self.determine_inbound_locale(locale)
-                        locale_translations = translations.get(inbound_locale)
-                        if locale_translations is not None and locale_translations != Constants.SNAPSHOT_SENTINEL:
-                            locale_resources_path = Utilities.replace_locale_in_path(source_path, source_locale, locale)
-                            for key, message in messages.items():
-                                translation = locale_translations.get(message)
-                                if locale_resources_path not in import_manifest:
-                                    import_manifest[locale_resources_path] = {}
-                                import_manifest[locale_resources_path][key] = translation
-        return import_manifest
+        if missing:
+            for resource in missing:
+                for path, messages in resource.items():
+                    locale = Utilities.get_locale_from_path(path, self.supported_locales)
+                    locale_translations = translations.get(locale)
+                    if locale_translations is not None:
+                        for key, message in messages.items():
+                            translation = locale_translations.get(message)
+                            if path not in import_manifest:
+                                import_manifest[path] = {}
+                            import_manifest[path][key] = translation
+        if added:
+            for resource in added:
+                for source_path, messages in resource.items():
+                    source_locale = Utilities.get_locale_from_path(source_path, [self.default_locale])
+                    if source_locale:
+                        for locale in self.supported_locales:
+                            inbound_locale = self.determine_inbound_locale(locale)
+                            locale_translations = translations.get(inbound_locale)
+                            if locale_translations is not None and locale_translations != Constants.SNAPSHOT_SENTINEL:
+                                locale_resources_path = Utilities.replace_locale_in_path(source_path, source_locale, locale)
+                                for key, message in messages.items():
+                                    translation = locale_translations.get(message)
+                                    # Update the import manifest with translations
+                                    if locale_resources_path not in import_manifest:
+                                        import_manifest[locale_resources_path] = {}
+                                    import_manifest[locale_resources_path][key] = translation
+                                    # Update new messages
+                                    if source_path not in new_messages:
+                                        new_messages[source_path] = {}
+                                    new_messages[source_path][key] = message
+        return import_manifest, new_messages
 
 
 class XlsTranslationsProcessor:
