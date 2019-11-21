@@ -15,7 +15,6 @@ class Constants:
     DEFAULT_TRANSL_PKG_NAME = 'translations'
     WORKING_DIR = 'translations-wrk/'
     DIST_PATH = 'translations-out/'
-    SNAPSHOT_SENTINEL = '__SNAPSHOT__'
 
 
 class XlsExporter(TranslationRequestGenerator):
@@ -115,7 +114,7 @@ class XlsImporter(TranslationResponseProcessor):
         expected_locales = self.supported_locales.copy()
         for inbound_locale, mapped_locales in self.import_mapping.items():
             expected_locales = [locale for locale in expected_locales if locale not in mapped_locales]
-            if inbound_locale not in expected_locales and inbound_locale != Constants.SNAPSHOT_SENTINEL:
+            if inbound_locale not in expected_locales:
                 expected_locales.append(inbound_locale)
         return expected_locales
 
@@ -153,7 +152,7 @@ class XlsImporter(TranslationResponseProcessor):
                         for locale in self.supported_locales:
                             inbound_locale = self.determine_inbound_locale(locale)
                             locale_translations = translations.get(inbound_locale)
-                            if locale_translations is not None and locale_translations != Constants.SNAPSHOT_SENTINEL:
+                            if locale_translations is not None:
                                 locale_resources_path = Utilities.replace_locale_in_path(source_path, source_locale, locale)
                                 for key, message in messages.items():
                                     translation = locale_translations.get(message)

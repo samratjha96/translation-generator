@@ -24,6 +24,10 @@ bundles:
   - path: src/main/resources
     extension: json
 
+snapshot:
+  copy:
+    - en_GB
+
 io:
   out:
     generator: translations.extensions.io_xls.XlsExporter
@@ -40,5 +44,3 @@ io:
       fr:
         - fr_CA
         - fr_FR
-      __SNAPSHOT__:
-        - en_GB

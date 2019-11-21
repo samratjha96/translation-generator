@@ -29,7 +29,7 @@ class Driver:
         if options.import_translations:
             translation_updates, new_messages = importer.process_response(manifest)
             TranslationUpdater.update(translation_updates)
-            SnapshotUpdater.update(manifest, new_messages)
+            SnapshotUpdater(config).update(manifest, new_messages)
         elif options.reconcile:
             Reconciliator(options, all_bundles).reconcile()
 
@@ -387,9 +387,11 @@ class TranslationUpdater:
 class SnapshotUpdater:
     whoami = __qualname__
 
-    @staticmethod
-    def update(manifest, new_messages):
-        Utilities.print_data(new_messages)
+    def __init__(self, config):
+        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
+        self.copy_to_locales = ConfigUtilities.get_value(config, ('snapshots', 'copy_to'))
+
+    def update(self, manifest, new_messages):
         added = manifest.data.get('added')
         if added:
             for resource in added:
@@ -401,6 +403,11 @@ class SnapshotUpdater:
                         for key, message in source_new_messages.items():
                             snapshot[key] = message
                         ResourceFileHandler.write_snapshot(snapshot_path, snapshot)
+                        for copy_to_locale in self.copy_to_locales:
+                            print(f'Copying snapshot "{snapshot_path}" content to locale {copy_to_locale}\'s resource.')
+                            ResourceFileHandler.write(
+                                Utilities.replace_locale_in_path(source_path, self.default_locale, copy_to_locale),
+                                snapshot)
 
 
 class Manifest:
