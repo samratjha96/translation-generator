@@ -1,0 +1,4 @@
+{
+    "test.name" : "Chinese HK key test",
+    "test.description" : "single key value pair test for properties files"
+}

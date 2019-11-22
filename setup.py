@@ -5,4 +5,10 @@ setup(name='translator',
       description='Translator tool',
       url='http://appian.com',
       packages=['translations', 'translations.extensions'],
-      scripts=['bin/translator'],)
+      install_requires=[
+            "PyYAML==5.1",
+            "jinja2==2.10.3",
+            "openpyxl==3.0.0",
+            "pandas==0.25.3"
+      ],
+      scripts=['bin/translator'])

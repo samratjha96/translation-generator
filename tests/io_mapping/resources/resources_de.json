@@ -1,0 +1,4 @@
+{
+    "test.name" : "German key test",
+    "test.description" : "single key value pair test for properties files"
+}

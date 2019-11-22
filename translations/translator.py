@@ -1,4 +1,5 @@
 import argparse
+import glob
 import importlib
 import os
 import sys
@@ -11,7 +12,6 @@ from abc import ABC, abstractmethod
 from translations.utils import Utilities, ConfigUtilities
 
 program = os.path.basename(sys.argv[0])
-config_file = 'translation-config.yml'
 
 
 class Driver:
@@ -19,25 +19,29 @@ class Driver:
 
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
-        config = self.load_config()
-        Validator().validate(config)
-        exporter = self.instantiate_exporter(config, options)
-        importer = self.instantiate_importer(config, options)
-        all_bundles = Bundler().gather(config)
+        config = Config()
+        if options.init_locale:
+            config.init(options.init_locale)
+        else:
+            config.load_config()
+            config.validate()
+            all_bundles = Bundler().gather(config.data)
+            manifest = TranslationGenerator(options, all_bundles).generate()
 
-        manifest = TranslationGenerator(options, all_bundles).generate()
-        if options.view:
-            Utilities.print_data(manifest.data)
-        if options.export:
-            exporter.generate_request(manifest)
-        if options.import_translations:
-            translation_updates, new_messages = importer.process_response(manifest)
-            TranslationUpdater.update(translation_updates)
-            SnapshotUpdater(config).update(manifest, new_messages)
-            Utilities.write_to_json_file('translations-manifest', manifest.data)
-            Utilities.write_to_json_file('translations-updates', translation_updates)
-        elif options.reconcile:
-            Reconciliator(options, all_bundles).reconcile()
+            if options.view:
+                Utilities.print_data(manifest.data)
+            if options.export:
+                exporter = self.instantiate_exporter(config.data, options)
+                exporter.generate_request(manifest)
+            if options.import_translations:
+                importer = self.instantiate_importer(config.data, options)
+                translation_updates, new_messages = importer.process_response(manifest)
+                TranslationUpdater.update(translation_updates)
+                SnapshotUpdater(config).update(manifest, new_messages)
+                Utilities.write_to_json_file('translations-manifest', manifest.data)
+                Utilities.write_to_json_file('translations-updates', translation_updates)
+            elif options.reconcile:
+                Reconciliator(options, all_bundles).reconcile()
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -47,8 +51,8 @@ class Driver:
 
         parser.add_argument('--output',
                             help='output type',
-                            choices=("yaml", "json"),
-                            default="yaml")
+                            choices=('yaml', 'json'),
+                            default='yaml')
 
         parser.add_argument('-d', '--dump',
                             help='enable process to dump output files providing information about the execution',
@@ -56,6 +60,11 @@ class Driver:
                             default=False)
 
         mode = parser.add_mutually_exclusive_group(required=True)
+        mode.add_argument('--init',
+                          help='initialize a base config file based on what messages bundles are found with provided '
+                               'default locale',
+                          dest='init_locale',
+                          default=None)
         mode.add_argument('-v', '--view',
                           help='view translations state',
                           action='store_true',
@@ -75,13 +84,6 @@ class Driver:
                           default=False)
         return parser.parse_args(args)
 
-    def load_config(self):
-        if not os.path.exists(config_file):
-            sys.exit(f'{self.whoami}: configuration file "{config_file}" not found')
-        with open(config_file, 'r') as f:
-            data = yaml.full_load(f)
-        return data
-
     def instantiate_exporter(self, config, options):
         exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'generator'))
         exporter_class = self.get_class(exporter_class_fqn)
@@ -97,6 +99,81 @@ class Driver:
         class_name = class_fqn[class_fqn.rfind('.') + 1:]
         io_module = importlib.import_module(module_name)
         return getattr(io_module, class_name)
+
+
+class Config:
+    whoami = __qualname__
+    config_file = 'translation-config.yml'
+    supported_file_types = {'properties', 'json'}
+    required_keys = {'path', 'extension'}
+    data = None
+
+    def init(self, init_locale):
+        self.data = {
+            'locales': {
+                'default': init_locale,
+            }
+        }
+        supported_locales = []
+        bundles = []
+        files = []
+        for supported_file in self.supported_file_types:
+            files = files + glob.glob(f'./**/*{init_locale}.{supported_file}', recursive=True)
+        for file in files:
+            parts = re.split(f'[-_.]{init_locale}\.', file, 1)
+            bundle_path = parts[0][:parts[0].rfind('/')]
+            bundle_name = parts[0][parts[0].rfind('/')+1:]
+            bundle_extension = parts[1]
+            bundles.append({
+                'bundle': bundle_path,
+                'name': bundle_name,
+                'extension': bundle_extension
+            })
+            locale_resources = glob.glob(f'{bundle_path}/{bundle_name}[-_.]*.{bundle_extension}')
+            for locale_resource in locale_resources:
+                supported_locale = re.search(f'{bundle_path}/{bundle_name}[-_.](.*?).{bundle_extension}', locale_resource).group(1)
+                if supported_locale not in supported_locales:
+                    supported_locales.append(supported_locale)
+        self.data['locales']['supported'] = supported_locales
+        self.data['bundles'] = bundles
+        with open(self.config_file, 'w') as outfile:
+            yaml.dump(self.data, outfile)
+            outfile.write('\n')
+
+    def load_config(self):
+        if not os.path.exists(self.config_file):
+            sys.exit(f'{self.whoami}: configuration file "{self.config_file}" not found')
+        with open(self.config_file, 'r') as f:
+            self.data = yaml.full_load(f)
+
+    def validate(self):
+        if self.data and 'bundles' in self.data and self.data.get('bundles'):
+            for bundle in self.data.get('bundles'):
+                self.validate_keys_in_bundle(bundle)
+                path = Utilities.resolve_path(bundle.get('path'))
+                if not os.path.exists(path):
+                    sys.exit(
+                        f'{self.whoami}: {path} does not exist'
+                    )
+                extension = bundle.get('extension')
+                if extension not in self.supported_file_types:
+                    sys.exit(
+                        f'{self.whoami}: .{extension} files are not one of the supported types\n' +
+                        ', '.join(sorted(self.supported_file_types))
+                    )
+                for fname in os.listdir(path):
+                    if fname.endswith(extension):
+                        break
+                else:
+                    sys.exit(f'{self.whoami}: no .{extension} file found in {path}')
+        else:
+            sys.exit(f'{self.whoami}: {self.config_file} does not have any bundles')
+
+    def validate_keys_in_bundle(self, bundle):
+        if self.required_keys - set(bundle.keys()):
+            sys.exit(
+                f'{self.whoami}: bundle configuration must have keys ' +
+                ', '.join(sorted(self.required_keys)))
 
 
 class JsonProcessor(object):
@@ -472,41 +549,6 @@ class Reconciliator:
 
     def alphabetize(self, file):
         return
-
-
-class Validator:
-    whoami = __qualname__
-
-    def validate(self, data):
-        ACCEPTED_FILE_TYPES = {'properties', 'json'}
-        if data and 'bundles' in data and data.get('bundles'):
-            for bundle in data.get('bundles'):
-                self.validate_keys_in_bundle(bundle)
-                path = Utilities.resolve_path(bundle.get('path'))
-                if not os.path.exists(path):
-                    sys.exit(
-                        f'{self.whoami}: {path} does not exist'
-                    )
-                extension = bundle.get('extension')
-                if extension not in ACCEPTED_FILE_TYPES:
-                    sys.exit(
-                        f'{self.whoami}: .{extension} files are not one of the supported types\n' +
-                        ', '.join(sorted(ACCEPTED_FILE_TYPES))
-                    )
-                for fname in os.listdir(path):
-                    if fname.endswith(extension):
-                        break
-                else:
-                    sys.exit(f'{self.whoami}: no .{extension} file found in {path}')
-        else:
-            sys.exit(f'{self.whoami}: {config_file} does not have any bundles')
-
-    def validate_keys_in_bundle(self, bundle):
-        REQUIRED_KEYS = {'path', 'extension'}
-        if REQUIRED_KEYS - set(bundle.keys()):
-            sys.exit(
-                f'{self.whoami}: bundle configuration must have keys ' +
-                ', '.join(sorted(REQUIRED_KEYS)))
 
 
 class TranslationRequestGenerator(ABC):

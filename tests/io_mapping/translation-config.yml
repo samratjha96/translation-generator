@@ -1,0 +1,47 @@
+# Container for generic tests
+locales:
+  default: en_US
+  supported:
+    - ar
+    - de
+    - en_GB
+    - es
+    - fr_CA
+    - fr_FR
+    - it
+    - ja
+    - nl
+    - pl
+    - pt
+    - ru
+    - sv
+    - zh_CN
+    - zh_HK
+
+bundles:
+  - path: other
+    name: resources
+    extension: properties
+  - path: resources
+    extension: json
+
+snapshot:
+  copy_to:
+    - en_GB
+
+io:
+  out:
+    generator: translations.extensions.io_xls.XlsExporter
+    name: translations
+    mapping:
+      fr_CA: fr
+      fr_FR: fr
+      en_US: ~
+      en_GB: ~
+  in:
+    importer: translations.extensions.io_xls.XlsImporter
+    package: translations-in/translations.zip
+    mapping:
+      fr:
+        - fr_CA
+        - fr_FR

@@ -83,7 +83,7 @@ class XlsExporter(TranslationRequestGenerator):
             return self.export_mapping[locale]
         return locale
 
-    def write_xls(self, locale, translations, postfix=None, context_col_value=None):
+    def write_xls(self, locale, translations, context_col_value=None):
         workbook = Workbook()
         sheet = workbook.active
 
@@ -98,7 +98,7 @@ class XlsExporter(TranslationRequestGenerator):
             sheet[f'C{row}'] = context_col_value if context_col_value else ''
             row += 1
 
-        workbook.save(Constants.DEFAULT_TRANSL_XLS_PATH + locale + ('-' + postfix if postfix else '') + '.xls')
+        workbook.save(Constants.DEFAULT_TRANSL_XLS_PATH + locale + '.xls')
 
 
 class XlsImporter(TranslationResponseProcessor):
