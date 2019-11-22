@@ -20,3 +20,9 @@ bundles:
 ```
 where each entry under `bundles` corresponds to a resource bundle that you want to manage with this tool
 * Run `translator --generate` to begin using the tool
+
+# Enhancements
+* Everywhere snapshot_file is referred to, should probably change to snapshot_file_name because that's what the bundle object returns
+* The reconciliator assumes order of insertion into a dictionary is preserved. When the processor parses all the files and converts them to a dictionary representation, the reconciliator assumes that this was done in order. Key value pairs in the dictionary representation outputted by the processor should appear in the same order they originally show up in the file
+* Rename the tool to not be so boring :D
+* Parallelize all the bundle operations. Can use threads or asyncio for this
