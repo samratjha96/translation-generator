@@ -1,0 +1,4 @@
+bundle:
+  - path: .
+    extension: properties
+    default_locale: en_US
