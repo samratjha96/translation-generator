@@ -1,0 +1,4 @@
+bundles:
+  - path: ..
+    extension: json
+    default_locale: en_US

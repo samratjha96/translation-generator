@@ -8,11 +8,14 @@ import json
 
 program = os.path.basename(sys.argv[0])
 config_file = "translation-config.yml"
-
+whoami = os.path.basename(sys.argv[0])
 
 class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
+        if options.config:
+            global config_file
+            config_file = options.config
         data = self.load_config()
         Validator().validate(data)
         all_bundles = Bundler().gather(data)
@@ -28,6 +31,10 @@ class Driver:
 
         parser.add_argument(
             "--output", help="output type", choices=("yaml", "json"), default="json"
+        )
+
+        parser.add_argument(
+            "--config", help="configuration yml file"
         )
 
         mode = parser.add_mutually_exclusive_group(required=True)
@@ -49,7 +56,11 @@ class Driver:
         if os.path.exists(config_file):
             with open(config_file, "r") as f:
                 data = yaml.full_load(f)
-        return data
+            return data
+        else:
+            sys.exit(
+                f"{whoami}: Configuration file {config_file} not found"
+            )
 
 
 class JsonProcessor(object):
