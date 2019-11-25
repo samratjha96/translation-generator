@@ -10,6 +10,7 @@ program = os.path.basename(sys.argv[0])
 config_file = "translation-config.yml"
 whoami = os.path.basename(sys.argv[0])
 
+
 class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
@@ -33,9 +34,7 @@ class Driver:
             "--output", help="output type", choices=("yaml", "json"), default="json"
         )
 
-        parser.add_argument(
-            "--config", help="configuration yml file"
-        )
+        parser.add_argument("--config", help="configuration yml file")
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument(
@@ -58,9 +57,7 @@ class Driver:
                 data = yaml.full_load(f)
             return data
         else:
-            sys.exit(
-                f"{whoami}: Configuration file {config_file} not found"
-            )
+            sys.exit(f"{whoami}: Configuration file {config_file} not found")
 
 
 class JsonProcessor(object):
@@ -339,16 +336,7 @@ class Reconciliator:
 
     def reconcile(self):
         for bundle in self.all_bundles:
-            bundle_as_dictionary = bundle.get_as_dictionary()
-            snapshot = bundle.get_snapshot_file()
-            default = bundle.get_default_locale_file()
-            other_locales = list(
-                filter(
-                    lambda key: (key != snapshot and key != default),
-                    bundle_as_dictionary.keys(),
-                )
-            )
-            self.remove_stale_entries(bundle, snapshot)
+            self.remove_stale_entries(bundle)
 
     """
         Remove all entries in files within bundles that don't
@@ -357,10 +345,18 @@ class Reconciliator:
         to be unclean and with state drift from the snapshot
     """
 
-    def remove_stale_entries(self, bundle, snapshot):
+    def remove_stale_entries(self, bundle):
         bundle_as_dictionary = bundle.get_as_dictionary()
-        for file in bundle_as_dictionary.keys():
-            keys_in_locale = bundle_as_dictionary[file].keys()
+        snapshot = bundle.get_snapshot_file()
+        default = bundle.get_default_locale_file()
+        check_locales = list(
+            filter(
+                lambda key: (key != snapshot and key != default),
+                bundle_as_dictionary.keys(),
+            )
+        )
+        for locale in check_locales:
+            keys_in_locale = bundle_as_dictionary[locale].keys()
             stale_keys = [
                 key
                 for key in keys_in_locale
@@ -368,12 +364,16 @@ class Reconciliator:
             ]
             if stale_keys:
                 for key in stale_keys:
-                    print(f"Deleting stale key '{key}' from {file}")
-                    del bundle_as_dictionary[file][key]
-                self.write_back_to_file(bundle, bundle_as_dictionary[file], file)
+                    print(f"Deleting stale key '{key}' from {locale}")
+                    del bundle_as_dictionary[locale][key]
+                self.write_back_to_file(
+                    bundle=bundle,
+                    contents=bundle_as_dictionary[locale],
+                    filename=locale,
+                )
 
-    def write_back_to_file(self, bundle, contents, file):
-        temp_file_name = file + ".new"
+    def write_back_to_file(self, bundle, contents, filename):
+        temp_file_name = filename + ".new"
         if bundle.extension == "json":
             JsonProcessor.dump_to_file(contents, temp_file_name)
         elif bundle.extension == "properties":
@@ -382,7 +382,7 @@ class Reconciliator:
             sys.exit(
                 f"{self.whoami}: Bundle type of {self.extension} is not one of the supported types"
             )
-        os.rename(temp_file_name, file)
+        os.rename(temp_file_name, filename)
         return
 
 
