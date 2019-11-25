@@ -19,7 +19,7 @@ class Driver:
             config_file = options.config
         data = self.load_config()
         Validator().validate(data)
-        all_bundles = Bundler().gather(data)
+        all_bundles = Bundler(options).gather(data)
         if options.generate:
             TranslationGenerator(options, all_bundles).generate_all()
         elif options.reconcile:
@@ -35,6 +35,12 @@ class Driver:
         )
 
         parser.add_argument("--config", help="configuration yml file")
+        parser.add_argument(
+            "--quiet",
+            help="suppress all print statements",
+            action="store_true",
+            default=False,
+        )
 
         mode = parser.add_mutually_exclusive_group(required=True)
         mode.add_argument(
@@ -129,7 +135,8 @@ class PropertiesProcessor(object):
 class Bundle(object):
     whoami = __qualname__
 
-    def __init__(self, path, extension, files, default_locale=None):
+    def __init__(self, options, path, extension, files, default_locale=None):
+        self.options = options
         self.path = path
         self.extension = extension
         self.files = set(files)
@@ -176,9 +183,10 @@ class Bundle(object):
         default_locale_path = self.get_default_locale_file()
         snapshot_file_path = "".join((default_locale_path, ".snapshot"))
         if not os.path.exists(snapshot_file_path):
-            print(
+            Utilities.fprint(
+                self.options,
                 f"generating snapshot file {snapshot_file_path} "
-                + f"based on {default_locale_path}"
+                + f"based on {default_locale_path}",
             )
             with open(snapshot_file_path, "a") as snap, open(default_locale_path, "r") as default:
                 for line in default:
@@ -247,17 +255,21 @@ class Bundle(object):
 class Bundler:
     all_bundles = []
 
+    def __init__(self, options):
+        self.options = options
+
     def add_to_all_bundles(self, bundle):
         path = bundle.get("path")
         extension = bundle.get("extension")
         default_locale = bundle.get("default_locale")
-        resolved_path = Utilities().resolve_path(path)
+        resolved_path = Utilities.resolve_path(path)
         all_files_in_bundle_path = []
         for file in os.listdir(resolved_path):
             if file.endswith(extension):
                 file_path = os.path.join(resolved_path, file)
                 all_files_in_bundle_path.append(file_path)
         bundle_object = Bundle(
+            options=self.options,
             path=resolved_path,
             extension=extension,
             files=all_files_in_bundle_path,
@@ -315,9 +327,9 @@ class Manifest:
             self.data["missing"].append(missed)
 
         if self.options.output == "json" and self.data:
-            print(json.dumps(self.data, indent=4))
+            Utilities.fprint(self.options, json.dumps(self.data, indent=4))
         elif self.options.output == "yaml" and self.data:
-            print(yaml.dump(self.data))
+            Utilities.fprint(self.options, yaml.dump(self.data))
 
 
 class Reconciliator:
@@ -337,6 +349,7 @@ class Reconciliator:
     def reconcile(self):
         for bundle in self.all_bundles:
             self.remove_stale_entries(bundle)
+            self.format_entries_order(bundle)
 
     """
         Remove all entries in files within bundles that don't
@@ -364,11 +377,54 @@ class Reconciliator:
             ]
             if stale_keys:
                 for key in stale_keys:
-                    print(f"Deleting stale key '{key}' from {locale}")
+                    Utilities.fprint(
+                        self.options, f"Deleting stale key '{key}' from {locale}"
+                    )
                     del bundle_as_dictionary[locale][key]
                 self.write_back_to_file(
                     bundle=bundle,
                     contents=bundle_as_dictionary[locale],
+                    filename=locale,
+                )
+
+    """
+        Format the order of all entries in non-default locales to
+        be in line with the snapshot file. This prevents any weird
+        re-ordering of entries within files. The snapshot file's
+        dictionary representation must have the key, value pairs
+        ordered in the same order as the file itself
+    """
+
+    def format_entries_order(self, bundle):
+        bundle_as_dictionary = bundle.get_as_dictionary()
+        snapshot = bundle.get_snapshot_file()
+        default = bundle.get_default_locale_file()
+        check_locales = list(
+            filter(
+                lambda key: (key != snapshot and key != default),
+                bundle_as_dictionary.keys(),
+            )
+        )
+        snapshot_keys = bundle_as_dictionary[snapshot].keys()
+        for locale in check_locales:
+            locale_keys = bundle_as_dictionary[locale].keys()
+            # If both sets of keys are in the same order, do nothing
+            if list(snapshot_keys) == list(locale_keys):
+                continue
+            else:
+                Utilities.fprint(
+                    self.options,
+                    f"Reordering entries in {locale} because they don't match snapshot order",
+                )
+                # Generate a new key, val dictionary in the same key order
+                # that it appears in the snapshot file
+                formatted_entries = {}
+                for key in snapshot_keys:
+                    if key in locale_keys:
+                        formatted_entries[key] = bundle_as_dictionary[locale][key]
+                self.write_back_to_file(
+                    bundle=bundle, 
+                    contents=formatted_entries, 
                     filename=locale,
                 )
 
@@ -394,7 +450,7 @@ class Validator:
         if data and "bundles" in data and data.get("bundles"):
             for bundle in data.get("bundles"):
                 self.validate_keys_in_bundle(bundle)
-                path = Utilities().resolve_path(bundle.get("path"))
+                path = Utilities.resolve_path(bundle.get("path"))
                 if not os.path.exists(path):
                     sys.exit(f"{self.whoami}: {path} does not exist")
                 extension = bundle.get("extension")
@@ -421,8 +477,14 @@ class Validator:
 
 
 class Utilities:
-    def resolve_path(self, path):
+    @classmethod
+    def resolve_path(cls, path):
         return os.path.realpath(path)
+
+    @classmethod
+    def fprint(cls, options, message):
+        if not options.quiet:
+            print(message)
 
 
 if __name__ == "__main__":
