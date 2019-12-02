@@ -7,7 +7,7 @@ import pandas as pd
 
 from openpyxl import Workbook
 from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor
-from translations.utils import ConfigUtilities, Utilities
+from translations.utils import Utilities
 
 
 class Constants:
@@ -21,10 +21,10 @@ class XlsExporter(TranslationRequestGenerator):
     whoami = __qualname__
 
     def __init__(self, config, options):
-        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
-        self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
-        self.out_name = ConfigUtilities.get_value(config, ('io', 'out', 'name'))
-        self.export_mapping = ConfigUtilities.get_value(config, ('io', 'out', 'mapping'))
+        self.default_locale = config.get_value(('locales', 'default'))
+        self.supported_locales = config.get_value(('locales', 'supported'))
+        self.out_name = config.get_value(('export', 'name'))
+        self.export_mapping = config.get_value(('export', 'mapping'))
         self.options = options
         Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
 
@@ -39,7 +39,7 @@ class XlsExporter(TranslationRequestGenerator):
                 else:
                     translations = []
 
-                for bundles in manifest.data.additions:
+                for bundles in manifest.get_new():
                     for bundle_path in bundles:
                         messages = bundles[bundle_path]
                         for message in messages.values():
@@ -49,7 +49,7 @@ class XlsExporter(TranslationRequestGenerator):
             else:
                 print(f'Processing added messages for locale "{locale}" was ignored')
 
-        for resources in manifest.data.missing:
+        for resources in manifest.get_missing():
             for resource_path in resources:
                 locale = Utilities.get_locale_from_path(resource_path, self.supported_locales)
                 locale_out_target = self.get_locale_out_target(locale)

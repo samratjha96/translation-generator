@@ -5,10 +5,6 @@ import shutil
 
 class Utilities:
     @staticmethod
-    def resolve_path(path):
-        return os.path.realpath(path)
-
-    @staticmethod
     def print_data(data):
         print(json.dumps(data, indent=4))
 
@@ -44,9 +40,10 @@ class Utilities:
             json.dump(content, outfile, ensure_ascii=False, indent=2)
             outfile.write('\n')
 
-
-class ConfigUtilities:
     @staticmethod
-    def get_value(config, keys):
-        return ConfigUtilities.get_value(config[keys[0]], keys[1:]) if keys else config
-
+    def confirm(question, options):
+        reply = str(input(question + ' (' + '/'.join(options) + ') ')).lower().strip()
+        if reply[0] in options:
+            return reply[0]
+        else:
+            return Utilities.confirm('Please use one of the valid options:', options)

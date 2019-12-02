@@ -9,7 +9,7 @@ import json
 
 from abc import ABC, abstractmethod
 
-from translations.utils import Utilities, ConfigUtilities
+from translations.utils import Utilities
 
 program = os.path.basename(sys.argv[0])
 
@@ -20,79 +20,92 @@ class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         config = Config()
-        if options.init_locale:
-            config.init(options.init_locale)
+        if options.command == 'init':
+            if not options.init_locale:
+                sys.exit(f'{self.whoami}: cannot initialize if initialization locale is not provided')
+            config.init(options.init_locale, options.source_paths)
+        elif options.command == 'clean':
+            if not options.init_locale:
+                sys.exit(f'{self.whoami}: cannot clean resource snapshots if initialization locale is not provided')
+            config.clean(options.init_locale, options.source_paths)
         else:
             config.load_config()
             config.validate()
-            all_bundles = Bundler().gather(config.data)
-            manifest = TranslationGenerator(options, all_bundles).generate()
+            all_bundles = Bundler().gather(config)
+            manifest = ManifestGenerator.generate(options, all_bundles)
 
-            if options.view:
+            if options.command == 'view':
                 Utilities.print_data(manifest.data)
-            if options.export:
-                exporter = self.instantiate_exporter(config.data, options)
-                exporter.generate_request(manifest)
-            if options.import_translations:
-                importer = self.instantiate_importer(config.data, options)
-                translation_updates, new_messages = importer.process_response(manifest)
-                TranslationUpdater.update(translation_updates)
-                SnapshotUpdater(config).update(manifest, new_messages)
-                Utilities.write_to_json_file('translations-manifest', manifest.data)
-                Utilities.write_to_json_file('translations-updates', translation_updates)
-            elif options.reconcile:
+            elif options.command == 'export':
+                exporter = self.instantiate_exporter(config, options)
+                if exporter:
+                    exporter.generate_request(manifest)
+                else:
+                    print('No exporter defined in configuration file')
+            elif options.command == 'import':
+                importer = self.instantiate_importer(config, options)
+                if importer:
+                    translation_updates, new_messages = importer.process_response(manifest)
+                    TranslationUpdater.update(translation_updates)
+                    SnapshotUpdater(config).update(manifest, new_messages)
+                    Utilities.write_to_json_file('translations-manifest', manifest.data)
+                    Utilities.write_to_json_file('translations-updates', translation_updates)
+                else:
+                    print('No importer defined in configuration file')
+            elif options.command == 'reconcile':
                 Reconciliator(options, all_bundles).reconcile()
+            else:
+                sys.exit(f'{self.whoami}: invalid command "{options.command}" provided; likely a programmer error.')
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
             prog=prog,
             description='Generator for candidate translation strings',
         )
+        parser.add_argument('command',
+                            choices=('init', 'clean', 'view', 'export', 'import', 'reconcile'),
+                            help='command to run')
 
+        # arguments specific for 'view' and 'clean' commands
+        init_args = parser.add_argument_group()
+        init_args.add_argument('-l', '--source-locale',
+                               help='define the locale that will serve as the source locale for the configuration',
+                               dest='init_locale',
+                               default=None)
+        init_args.add_argument('-s', '--source-path',
+                               nargs='+',
+                               dest='source_paths',
+                               help='list relative paths of where to look for translation bundles',
+                               default=['.'],
+                               type=str)
+
+        # arguments applicable to any command
         parser.add_argument('--output',
                             help='output type',
                             choices=('yaml', 'json'),
                             default='yaml')
-
         parser.add_argument('-d', '--dump',
                             help='enable process to dump output files providing information about the execution',
                             action='store_true',
                             default=False)
 
-        mode = parser.add_mutually_exclusive_group(required=True)
-        mode.add_argument('--init',
-                          help='initialize a base config file based on what messages bundles are found with provided '
-                               'default locale',
-                          dest='init_locale',
-                          default=None)
-        mode.add_argument('-v', '--view',
-                          help='view translations state',
-                          action='store_true',
-                          default=False)
-        mode.add_argument('-e', '--export',
-                          help='generate export of pending translations',
-                          action='store_true',
-                          default=False)
-        mode.add_argument('-i', '--import-translations',
-                          dest='import_translations',
-                          help='import translations',
-                          action='store_true',
-                          default=False)
-        mode.add_argument('--reconcile',
-                          help='sanitize locale files',
-                          action='store_true',
-                          default=False)
         return parser.parse_args(args)
 
     def instantiate_exporter(self, config, options):
-        exporter_class_fqn = ConfigUtilities.get_value(config, ('io', 'out', 'generator'))
-        exporter_class = self.get_class(exporter_class_fqn)
-        return exporter_class(config, options)
+        try:
+            exporter_class_fqn = config.get_value(('export', 'generator'))
+            exporter_class = self.get_class(exporter_class_fqn)
+            return exporter_class(config, options)
+        except:
+            return None
 
     def instantiate_importer(self, config, options):
-        importer_class_fqn = ConfigUtilities.get_value(config, ('io', 'in', 'importer'))
-        importer_class = self.get_class(importer_class_fqn)
-        return importer_class(config, options)
+        try:
+            importer_class_fqn = config.get_value(('import', 'importer'))
+            importer_class = self.get_class(importer_class_fqn)
+            return importer_class(config, options)
+        except:
+            return None
 
     def get_class(self, class_fqn):
         module_name = class_fqn[:class_fqn.rfind('.')]
@@ -105,10 +118,9 @@ class Config:
     whoami = __qualname__
     config_file = 'translation-config.yml'
     supported_file_types = {'properties', 'json'}
-    required_keys = {'path', 'extension'}
     data = None
 
-    def init(self, init_locale):
+    def init(self, init_locale, source_paths):
         self.data = {
             'locales': {
                 'default': init_locale,
@@ -117,28 +129,48 @@ class Config:
         supported_locales = []
         bundles = []
         files = []
-        for supported_file in self.supported_file_types:
-            files = files + glob.glob(f'./**/*{init_locale}.{supported_file}', recursive=True)
+        for source_path in source_paths:
+            for supported_file in self.supported_file_types:
+                if source_path[-1:] != '/':
+                    source_path = source_path + '/'
+                files = files + glob.glob(f'{source_path}**/*[-_]{init_locale}.{supported_file}', recursive=True)
         for file in files:
-            parts = re.split(f'[-_.]{init_locale}\.', file, 1)
-            bundle_path = parts[0][:parts[0].rfind('/')]
-            bundle_name = parts[0][parts[0].rfind('/')+1:]
-            bundle_extension = parts[1]
             bundles.append({
-                'bundle': bundle_path,
-                'name': bundle_name,
-                'extension': bundle_extension
+                'source': file
             })
-            locale_resources = glob.glob(f'{bundle_path}/{bundle_name}[-_.]*.{bundle_extension}')
-            for locale_resource in locale_resources:
-                supported_locale = re.search(f'{bundle_path}/{bundle_name}[-_.](.*?).{bundle_extension}', locale_resource).group(1)
-                if supported_locale not in supported_locales:
-                    supported_locales.append(supported_locale)
+            bundle_path, source_locale, bundle_extension, bundle_resources = ResourceFileHandler.get_bundle_elements(file)
+            for locale_resource in bundle_resources:
+                supported_locale = ResourceFileHandler.get_resource_locale(locale_resource, bundle_path, bundle_extension)
+                if supported_locale:
+                    if supported_locale != init_locale and supported_locale not in supported_locales:
+                        supported_locales.append(supported_locale)
+                else:
+                    print(f'Did not find locale in path "{locale_resource}"')
         self.data['locales']['supported'] = supported_locales
         self.data['bundles'] = bundles
+        # Utilities.print_data(self.data)
         with open(self.config_file, 'w') as outfile:
             yaml.dump(self.data, outfile)
             outfile.write('\n')
+
+    def clean(self, init_locale, source_paths):
+        print(f'{self.whoami}: searching for resource snapshots by initialization locale "{init_locale}"...')
+        files = []
+        for source_path in source_paths:
+            for supported_file_type in self.supported_file_types:
+                if source_path[-1:] != '/':
+                    source_path = source_path + '/'
+                files = files + glob.glob(f'{source_path}**/*[-_]{init_locale}.{supported_file_type}.snapshot', recursive=True)
+        if len(files) > 0:
+            reply = Utilities.confirm(f'{self.whoami}: Found "{len(files)}" '
+                                      f'snapshots to clear; delete [a]ll or [c]onfirm each?', ['a', 'c'])
+            for file in files:
+                if reply == 's':
+                    break
+                if reply != 'a':
+                    reply = Utilities.confirm(f'{self.whoami}: Delete snapshot: "{file}" [y]es, [n]o, [a]ll, or [s]top?', ['y', 'n', 'a', 's'])
+                if reply == 'y' or reply == 'a':
+                    os.remove(file)
 
     def load_config(self):
         if not os.path.exists(self.config_file):
@@ -147,84 +179,135 @@ class Config:
             self.data = yaml.full_load(f)
 
     def validate(self):
-        if self.data and 'bundles' in self.data and self.data.get('bundles'):
-            for bundle in self.data.get('bundles'):
-                self.validate_keys_in_bundle(bundle)
-                path = Utilities.resolve_path(bundle.get('path'))
-                if not os.path.exists(path):
-                    sys.exit(
-                        f'{self.whoami}: {path} does not exist'
-                    )
-                extension = bundle.get('extension')
-                if extension not in self.supported_file_types:
-                    sys.exit(
-                        f'{self.whoami}: .{extension} files are not one of the supported types\n' +
-                        ', '.join(sorted(self.supported_file_types))
-                    )
-                for fname in os.listdir(path):
-                    if fname.endswith(extension):
-                        break
-                else:
-                    sys.exit(f'{self.whoami}: no .{extension} file found in {path}')
-        else:
+        try:
+            self.get_value(('locales', 'default'))
+        except:
+            sys.exit(f'{self.whoami}: config file "{self.config_file}" does not have a default locale defined')
+        try:
+            self.get_value(('locales', 'supported'))
+        except:
+            sys.exit(f'{self.whoami}: config file "{self.config_file}" does not have supported locales defined')
+
+        try:
+            for bundle in self.get_value('bundles'):
+                source = bundle.get('source')
+                if not os.path.exists(source):
+                    # ToDo: Logger impl - set as WARN
+                    print(f'{self.whoami}: "{source}" does not exist')
+        except:
             sys.exit(f'{self.whoami}: {self.config_file} does not have any bundles')
 
-    def validate_keys_in_bundle(self, bundle):
-        if self.required_keys - set(bundle.keys()):
-            sys.exit(
-                f'{self.whoami}: bundle configuration must have keys ' +
-                ', '.join(sorted(self.required_keys)))
+    def get_value(self, keys, config=None):
+        config = self.data if config is None else config
+        if isinstance(keys, str):
+            return config[keys]
+        elif len(keys) == 1:
+            return config[keys[0]]
+        return self.get_value(keys[1:], config[keys[0]]) if keys else config
 
 
-class JsonProcessor(object):
+class JsonProcessor:
     '''
         Processor that can convert json content in files to a python
         dictionary keyed with the file name
     '''
-
-    def __init__(self, files):
-        self.files = set(files)
-        self.dict_representation = {}
-
-    def parse_to_dict(self, files):
+    @staticmethod
+    def get_as_dictionary(files):
+        dict_representation = {}
         for file in files:
-            self.dict_representation[file] = ResourceFileHandler.read_json(file)
+            dict_representation[file] = JsonProcessor.read(file)
+        return dict_representation
 
-    def get_as_dictionary(self):
-        self.parse_to_dict(self.files)
-        return self.dict_representation
+    @staticmethod
+    def read(resource_path):
+        with open(resource_path) as f:
+            dictdump = json.loads(f.read())
+        return dictdump
+
+    @staticmethod
+    def write(resource_path, messages):
+        print(f'Writing to file "{resource_path}"')
+        with open(resource_path, encoding='utf-8', mode='w') as outfile:
+            json.dump(messages, outfile, ensure_ascii=False, indent=2)
+            outfile.write('\n')
 
 
-class PropertiesProcessor(object):
+class PropertiesProcessor:
     '''
         Processor that can convert a properties file to a python
         dictionary keyed with the file name
     '''
     separator = '='
     comment_char = '#'
+    multiline_char = '\\'
 
-    def __init__(self, files):
-        self.files = set(files)
-        self.dict_representation = {}
-
-    def parse_to_dict(self, files):
+    @staticmethod
+    def get_as_dictionary(files):
+        dict_representation = {}
         for file in files:
-            self.dict_representation[file] = ResourceFileHandler.read_properties(file)
+            dict_representation[file] = PropertiesProcessor.read(file)
+        return dict_representation
 
-    def get_as_dictionary(self):
-        self.parse_to_dict(self.files)
-        return self.dict_representation
+    @staticmethod
+    def read(resource_path):
+        current_property = ''
+        current_file_key_val = {}
+        with open(resource_path, "rt") as f:
+            try:
+                for line in f:
+                    line = line.strip()
+                    if line and not current_property.startswith(PropertiesProcessor.comment_char):
+                        current_property += line
+                        if not line.endswith(PropertiesProcessor.multiline_char):
+                            key_value_split = current_property.split(PropertiesProcessor.separator)
+                            key = key_value_split[0].strip()
+                            value = PropertiesProcessor.separator.join(key_value_split[1:]).strip().strip('"')
+                            if value:
+                                try:
+                                    current_file_key_val[key] = value.encode('utf-8').decode('unicode-escape')
+                                except:
+                                    raise Exception(f'Failed to UTF8 encode "{value}"')
+                            current_property = ''
+                        else:
+                            current_property = current_property[:-1]
+            except Exception as err:
+                print(f'Failed to process resource "{resource_path}", cause: {err}')
+        return current_file_key_val
+
+    @staticmethod
+    def write(resource_path, messages):
+        with open(resource_path, encoding='utf-8', mode='w') as outfile:
+            for key in messages.keys():
+                line = key + '=' + Utilities.get_unicode_markup(messages[key])
+                outfile.write(line)
+                outfile.write('\n')
 
 
 class ResourceFileHandler:
+    @staticmethod
+    def get_bundle_elements(source):
+        parts = re.split(f'[-_][a-zA-Z]{{2}}[-_][a-zA-Z]{{2}}\.', source, 1)
+        bundle_path = parts[0]
+        bundle_extension = parts[1]
+        bundle_resources = glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z][-_][a-zA-Z][a-zA-Z].{bundle_extension}') + \
+                           glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z].{bundle_extension}')
+        default_locale = ResourceFileHandler.get_resource_locale(source, bundle_path, bundle_extension)
+        return bundle_path, default_locale, bundle_extension, bundle_resources
+
+    @staticmethod
+    def get_resource_locale(resource, bundle_path, bundle_extension):
+        bundle_path = bundle_path.replace('$', '\\$')
+        result = re.search(
+            f'{bundle_path}[-_]([a-zA-Z]{{2}}[-_][a-zA-Z]{{2}}|[a-zA-Z]{{2}}).{bundle_extension}', resource)
+        return None if result is None else result.group(1)
 
     @staticmethod
     def read(resource_path):
         extension = resource_path[resource_path.rfind('.') + 1:]
         if extension == 'properties':
-            return ResourceFileHandler.read_properties(resource_path)
+            return PropertiesProcessor.read(resource_path)
         elif extension == 'json':
-            return ResourceFileHandler.read_json(resource_path)
+            return JsonProcessor.read(resource_path)
         elif extension == 'snapshot':
             return ResourceFileHandler.read(resource_path[:resource_path.rfind('.')])
 
@@ -236,42 +319,19 @@ class ResourceFileHandler:
         orig_source = snapshot_path[:snapshot_path.rfind('.')]
         extension = orig_source[orig_source.rfind('.') + 1:]
         if extension == 'properties':
-            return ResourceFileHandler.read_properties(snapshot_path)
+            return PropertiesProcessor.read(snapshot_path)
         elif extension == 'json':
-            return ResourceFileHandler.read_json(snapshot_path)
+            return JsonProcessor.read(snapshot_path)
         print(f'Unsupported resource extension: {extension}')
         return {}
-
-    @staticmethod
-    def read_properties(resource_path):
-        separator = '='
-        comment_char = '#'
-
-        current_file_key_val = {}
-        with open(resource_path, "rt") as f:
-            for line in f:
-                l = line.strip()
-                if l and not l.startswith(comment_char):
-                    key_value_split = l.split(separator)
-                    key = key_value_split[0].strip()
-                    value = separator.join(key_value_split[1:]).strip().strip('"')
-                    if value:
-                        current_file_key_val[key] = value.encode('utf-8').decode('unicode-escape')
-        return current_file_key_val
-
-    @staticmethod
-    def read_json(resource_path):
-        with open(resource_path) as f:
-            dictdump = json.loads(f.read())
-        return dictdump
 
     @staticmethod
     def write(resource_path, translations):
         extension = resource_path[resource_path.rfind('.') + 1:]
         if extension == 'properties':
-            ResourceFileHandler.write_properties(resource_path, translations)
+            PropertiesProcessor.write(resource_path, translations)
         elif extension == 'json':
-            ResourceFileHandler.write_json(resource_path, translations)
+            JsonProcessor.write(resource_path, translations)
         else:
             print(f'Unsupported resource extension: {extension}')
 
@@ -280,87 +340,33 @@ class ResourceFileHandler:
         orig_source = snapshot_path[:snapshot_path.rfind('.')]
         extension = orig_source[orig_source.rfind('.') + 1:]
         if extension == 'properties':
-            ResourceFileHandler.write_properties(snapshot_path, messages)
+            PropertiesProcessor.write(snapshot_path, messages)
         elif extension == 'json':
-            ResourceFileHandler.write_json(snapshot_path, messages)
+            JsonProcessor.write(snapshot_path, messages)
         else:
             print(f'Unsupported resource extension: {extension}')
         return {}
-
-    @staticmethod
-    def write_properties(resource_path, messages):
-        with open(resource_path, encoding='utf-8', mode='w') as outfile:
-            for key in messages.keys():
-                line = key + '=' + Utilities.get_unicode_markup(messages[key])
-                outfile.write(line)
-                outfile.write('\n')
-
-    @staticmethod
-    def write_json(resource_path, messages):
-        with open(resource_path, 'w') as outfile:
-            json.dump(messages, outfile, ensure_ascii=False, indent=2)
-            outfile.write('\n')
 
 
 class Bundle(object):
     whoami = __qualname__
 
-    def __init__(self, path, extension, files, default_locale=None):
-        self.path = path
+    def __init__(self, source, extension, files, source_locale):
+        self.source = source
         self.extension = extension
         self.files = set(files)
-        self.default_locale = default_locale or "en_US"
-        # Processing related variables
-        self.snapshot_file = ''
-        self.default_locale_file = ''
+        self.source_locale = source_locale
+        self.snapshot_file_path = self.init_snapshot(source)
         self.bundle_as_dictionary = {}
         self.missing_items = {}
-        self.added_items = {}
+        self.new_items = {}
 
-    def get_default_locale_file(self):
-        if self.default_locale_file:
-            return self.default_locale_file
-
-        locale_regex_match = []
-        for file in self.files:
-            '''
-                This regex matches all files that have _{default_locale} in their
-                filename but not if that file also contains the word snapshot. This
-                is to prevent the regex matching of the snapshot file when looking
-                for the default locale file
-            '''
-            if re.match(rf'.*_{self.default_locale}(?!(.*snapshot)).*', file):
-                locale_regex_match.append(file)
-        if len(locale_regex_match) > 1:
-            sys.exit(
-                f'{self.whoami}: There were multiple regex matches of '
-                + f'_{self.default_locale} in {self.path}: {locale_regex_match}. '
-                + f'Expecting only a single match'
-            )
-        elif len(locale_regex_match) == 0:
-            sys.exit(
-                f'{self.whoami}: Expected default locale file to match regex '
-                + f'.*_{self.default_locale} but no files in {self.path} matched'
-            )
-        else:
-            return locale_regex_match[0]
-
-    def get_snapshot_file(self):
-        if self.snapshot_file:
-            return self.snapshot_file
-
-        default_locale_path = self.get_default_locale_file()
-        snapshot_file_path = ''.join((default_locale_path, '.snapshot'))
+    def init_snapshot(self, source):
+        snapshot_file_path = source + '.snapshot'
         if not os.path.exists(snapshot_file_path):
-            print(
-                f'generating snapshot file {snapshot_file_path} '
-                + f'based on {default_locale_path}'
-            )
-            with open(snapshot_file_path, 'a') as snap, open(default_locale_path, 'r') as default:
+            with open(snapshot_file_path, 'a') as snap, open(source, 'r') as default:
                 for line in default:
                     snap.write(line)
-        if snapshot_file_path not in self.files:
-            self.files.add(snapshot_file_path)
         return snapshot_file_path
 
     def convert_to_dictionary(self):
@@ -368,36 +374,31 @@ class Bundle(object):
             return self.bundle_as_dictionary
 
         if self.extension == 'json':
-            self.bundle_as_dictionary = JsonProcessor(self.files).get_as_dictionary()
+            self.bundle_as_dictionary = JsonProcessor.get_as_dictionary(self.files)
         elif self.extension == 'properties':
-            self.bundle_as_dictionary = PropertiesProcessor(self.files).get_as_dictionary()
+            self.bundle_as_dictionary = PropertiesProcessor.get_as_dictionary(self.files)
         else:
             sys.exit(
                 f'{self.whoami}: Bundle type of {self.extension} is not one of the supported types')
         return self.bundle_as_dictionary
 
     # Find all items that exist in the snapshot but not in a locale file
-    def get_missing_items_in_bundle(self):
+    def get_missing_items_in_bundle(self, bundle_snapshot_data):
         bundle_as_dictionary = self.convert_to_dictionary()
-        snapshot_file = self.get_snapshot_file()
-        snapshot = bundle_as_dictionary[snapshot_file]
         for file in bundle_as_dictionary.keys():
             candidate = bundle_as_dictionary[file]
-            missing = {key: val for key, val in snapshot.items() if key not in candidate.keys()}
+            missing = {key: val for key, val in bundle_snapshot_data.items() if key not in candidate.keys()}
             if missing:
                 self.missing_items[file] = missing
         return self.missing_items
 
     # Find all items that exist in the default locale file but not the snapshot
-    def get_added_items_in_bundle(self):
+    def get_new_items_in_bundle(self, bundle_snapshot_data):
         bundle_as_dictionary = self.convert_to_dictionary()
-        snapshot_file = self.get_snapshot_file()
-        snapshot = bundle_as_dictionary[snapshot_file]
-        default_locale_file = self.get_default_locale_file()
-        default = bundle_as_dictionary[default_locale_file]
+        default = bundle_as_dictionary[self.source]
 
-        if default != snapshot:
-            new_values = {key: val for key, val in default.items() if default[key] not in snapshot.values()}
+        if default != bundle_snapshot_data:
+            new_values = {key: val for key, val in default.items() if default[key] not in bundle_snapshot_data.values()}
             '''
                 TODO: Ignoring the capability to actually make an inplace
                 edit on the default locale file for any key value pair.
@@ -407,60 +408,42 @@ class Bundle(object):
                 in the default locale file. How do we reconcile this?
             '''
             if new_values:
-                self.added_items[default_locale_file] = new_values
-        return self.added_items
+                self.new_items[self.source_locale] = new_values
+        return self.new_items
 
 
 class Bundler:
-    all_bundles = []
-
-    def add_to_all_bundles(self, bundle):
-        path = bundle.get('path')
-        extension = bundle.get('extension')
-        default_locale = bundle.get('default_locale')
-        resolved_path = Utilities.resolve_path(path)
-        all_files_in_bundle_path = []
-        for file in os.listdir(resolved_path):
-            if file.endswith(extension):
-                file_path = os.path.join(resolved_path, file)
-                all_files_in_bundle_path.append(file_path)
-        bundle_object = Bundle(path=resolved_path, extension=extension, files=all_files_in_bundle_path,
-                               default_locale=default_locale)
-        self.all_bundles.append(bundle_object)
-
-    def gather(self, data):
-        for bundle in data.get('bundles'):
-            self.add_to_all_bundles(bundle)
-        for bundle_obj in self.all_bundles:
-            bundle_obj.get_snapshot_file()
-        return self.all_bundles
+    @staticmethod
+    def gather(config):
+        all_bundles = []
+        for bundle_config in config.data.get('bundles'):
+            source = bundle_config.get('source')
+            extension = source[source.rfind('.')+1:]
+            bundle_path, source_locale, bundle_extension, locale_resources = ResourceFileHandler.get_bundle_elements(source)
+            all_bundles.append(Bundle(source, extension, locale_resources, source_locale))
+        return all_bundles
 
 
-class TranslationGenerator:
+class ManifestGenerator:
     '''
         Accepts a list of Bundle objects and apply the necessary parser
         to generate all the differences between the default_locale, it's corresponding
         snapshot and all the other locales
     '''
-    whoami = __qualname__
-    all_bundles = []
-    additions = []
-    missing = []
-
-    def __init__(self, options, all_bundles):
-        self.options = options
-        self.all_bundles = all_bundles
-
-    def generate(self):
-        manifest = Manifest(self.options)
-        for bundle in self.all_bundles:
-            missing_items = bundle.get_missing_items_in_bundle()
-            added_items = bundle.get_added_items_in_bundle()
+    @staticmethod
+    def generate(options, all_bundles):
+        new = []
+        missing = []
+        manifest = Manifest(options)
+        for bundle in all_bundles:
+            bundle_snapshot_data = ResourceFileHandler.read_snapshot(bundle.snapshot_file_path)
+            missing_items = bundle.get_missing_items_in_bundle(bundle_snapshot_data)
+            new_items = bundle.get_new_items_in_bundle(bundle_snapshot_data)
             if missing_items:
-                self.missing.append(missing_items)
-            if added_items:
-                self.additions.append(added_items)
-        manifest.build(self.missing, self.additions)
+                missing.append(missing_items)
+            if new_items:
+                new.append(new_items)
+        manifest.build(new, missing)
         return manifest
 
 
@@ -481,13 +464,13 @@ class SnapshotUpdater:
     whoami = __qualname__
 
     def __init__(self, config):
-        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
-        self.copy_to_locales = ConfigUtilities.get_value(config, ('snapshots', 'copy_to'))
+        self.default_locale = config.get_value(config, ('locales', 'default'))
+        self.copy_to_locales = config.get_value(config, ('snapshots', 'copy_to'))
 
     def update(self, manifest, new_messages):
-        added = manifest.data.get('added')
-        if added:
-            for resource in added:
+        new = manifest.get_new()
+        if new:
+            for resource in new:
                 for source_path, messages in resource.items():
                     if source_path in new_messages.keys():
                         source_new_messages = new_messages[source_path]
@@ -509,13 +492,19 @@ class Manifest:
     def __init__(self, options):
         self.options = options
 
-    def build(self, missing, additions):
-        for added in additions:
-            self.data["added"] = self.data.get("added") or []
-            self.data["added"].append(added)
-        for missed in missing:
-            self.data["missing"] = self.data.get("missing") or []
-            self.data["missing"].append(missed)
+    def build(self, new, missing):
+        for msg in new:
+            self.data['new'] = self.data.get('new') or []
+            self.data['new'].append(msg)
+        for msg in missing:
+            self.data['missing'] = self.data.get('missing') or []
+            self.data['missing'].append(msg)
+
+    def get_new(self):
+        return self.data['new'] or []
+
+    def get_missing(self):
+        return self.data['missing'] or []
 
     def print(self):
         if self.options.output == 'json' and self.data:
