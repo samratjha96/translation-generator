@@ -20,7 +20,10 @@ class Driver:
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         config = Config()
-        if options.command == 'init':
+        if options.command == 'version':
+            # ToDo: Improve
+            sys.exit(f'{self.whoami}: Version = 1.0.0')
+        elif options.command == 'init':
             if not options.init_locale:
                 sys.exit(f'{self.whoami}: cannot initialize if initialization locale is not provided')
             config.init(options.init_locale, options.source_paths)
@@ -60,10 +63,10 @@ class Driver:
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
             prog=prog,
-            description='Generator for candidate translation strings',
+            description='Translation utility',
         )
         parser.add_argument('command',
-                            choices=('init', 'clean', 'view', 'export', 'import', 'reconcile'),
+                            choices=('version', 'init', 'clean', 'view', 'export', 'import', 'reconcile'),
                             help='command to run')
 
         # arguments specific for 'view' and 'clean' commands
