@@ -117,60 +117,50 @@ class Driver:
 class Config:
     whoami = __qualname__
     config_file = 'translation-config.yml'
-    supported_file_types = {'properties', 'json'}
     data = None
 
     def init(self, init_locale, source_paths):
         self.data = {
+            'sources': source_paths,
             'locales': {
                 'default': init_locale,
             }
         }
         supported_locales = []
-        bundles = []
-        files = []
-        for source_path in source_paths:
-            for supported_file in self.supported_file_types:
-                if source_path[-1:] != '/':
-                    source_path = source_path + '/'
-                files = files + glob.glob(f'{source_path}**/*[-_]{init_locale}.{supported_file}', recursive=True)
-        for file in files:
-            bundles.append({
-                'source': file
-            })
-            bundle_path, source_locale, bundle_extension, bundle_resources = ResourceFileHandler.get_bundle_elements(file)
-            for locale_resource in bundle_resources:
-                supported_locale = ResourceFileHandler.get_resource_locale(locale_resource, bundle_path, bundle_extension)
+        resources = ResourceFileHandler.find_resources_in_source_paths(init_locale, source_paths)
+        for resource in resources:
+            bundle = ResourceFileHandler.get_bundle(resource)
+            print(f'Initiated Bundle: {str(bundle)}')
+            for locale_resource in bundle.resources:
+                supported_locale = ResourceFileHandler.get_resource_locale(locale_resource, bundle.path, bundle.extension)
                 if supported_locale:
                     if supported_locale != init_locale and supported_locale not in supported_locales:
                         supported_locales.append(supported_locale)
                 else:
                     print(f'Did not find locale in path "{locale_resource}"')
         self.data['locales']['supported'] = supported_locales
-        self.data['bundles'] = bundles
-        # Utilities.print_data(self.data)
         with open(self.config_file, 'w') as outfile:
             yaml.dump(self.data, outfile)
             outfile.write('\n')
 
     def clean(self, init_locale, source_paths):
         print(f'{self.whoami}: searching for resource snapshots by initialization locale "{init_locale}"...')
-        files = []
-        for source_path in source_paths:
-            for supported_file_type in self.supported_file_types:
-                if source_path[-1:] != '/':
-                    source_path = source_path + '/'
-                files = files + glob.glob(f'{source_path}**/*[-_]{init_locale}.{supported_file_type}.snapshot', recursive=True)
-        if len(files) > 0:
-            reply = Utilities.confirm(f'{self.whoami}: Found "{len(files)}" '
+        resources = ResourceFileHandler.find_resources_in_source_paths(init_locale, source_paths)
+        snapshots = []
+        for resource in resources:
+            snapshot = resource + '.snapshot'
+            if os.path.exists(snapshot):
+                snapshots.append(snapshot)
+        if len(snapshots) > 0:
+            reply = Utilities.confirm(f'{self.whoami}: Found "{len(snapshots)}" '
                                       f'snapshots to clear; delete [a]ll or [c]onfirm each?', ['a', 'c'])
-            for file in files:
+            for snapshot in snapshots:
                 if reply == 's':
                     break
                 if reply != 'a':
-                    reply = Utilities.confirm(f'{self.whoami}: Delete snapshot: "{file}" [y]es, [n]o, [a]ll, or [s]top?', ['y', 'n', 'a', 's'])
+                    reply = Utilities.confirm(f'{self.whoami}: Delete snapshot: "{snapshot}" [y]es, [n]o, [a]ll, or [s]top?', ['y', 'n', 'a', 's'])
                 if reply == 'y' or reply == 'a':
-                    os.remove(file)
+                    os.remove(snapshot)
 
     def load_config(self):
         if not os.path.exists(self.config_file):
@@ -189,13 +179,12 @@ class Config:
             sys.exit(f'{self.whoami}: config file "{self.config_file}" does not have supported locales defined')
 
         try:
-            for bundle in self.get_value('bundles'):
-                source = bundle.get('source')
-                if not os.path.exists(source):
+            for source_path in self.get_value('sources'):
+                if not os.path.exists(source_path):
                     # ToDo: Logger impl - set as WARN
-                    print(f'{self.whoami}: "{source}" does not exist')
+                    print(f'{self.whoami}: "{source_path}" does not exist')
         except:
-            sys.exit(f'{self.whoami}: {self.config_file} does not have any bundles')
+            sys.exit(f'{self.whoami}: {self.config_file} does not have any sources defined')
 
     def get_value(self, keys, config=None):
         config = self.data if config is None else config
@@ -284,15 +273,27 @@ class PropertiesProcessor:
 
 
 class ResourceFileHandler:
+    supported_file_types = {'properties', 'json'}
+
     @staticmethod
-    def get_bundle_elements(source):
+    def find_resources_in_source_paths(source_locale, source_paths):
+        resources = []
+        for source_path in source_paths:
+            for supported_file in ResourceFileHandler.supported_file_types:
+                if source_path[-1:] != '/':
+                    source_path = source_path + '/'
+                resources = resources + glob.glob(f'{source_path}**/*[-_]{source_locale}.{supported_file}', recursive=True)
+        return resources
+
+    @staticmethod
+    def get_bundle(source):
         parts = re.split(f'[-_][a-zA-Z]{{2}}[-_][a-zA-Z]{{2}}\.', source, 1)
         bundle_path = parts[0]
         bundle_extension = parts[1]
         bundle_resources = glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z][-_][a-zA-Z][a-zA-Z].{bundle_extension}') + \
                            glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z].{bundle_extension}')
         default_locale = ResourceFileHandler.get_resource_locale(source, bundle_path, bundle_extension)
-        return bundle_path, default_locale, bundle_extension, bundle_resources
+        return Bundle(source, bundle_path, bundle_extension, bundle_resources, default_locale)
 
     @staticmethod
     def get_resource_locale(resource, bundle_path, bundle_extension):
@@ -351,15 +352,26 @@ class ResourceFileHandler:
 class Bundle(object):
     whoami = __qualname__
 
-    def __init__(self, source, extension, files, source_locale):
+    def __init__(self, source, path, extension, resources, source_locale):
         self.source = source
+        self.path = path
         self.extension = extension
-        self.files = set(files)
+        self.resources = set(resources)
         self.source_locale = source_locale
         self.snapshot_file_path = self.init_snapshot(source)
         self.bundle_as_dictionary = {}
         self.missing_items = {}
         self.new_items = {}
+
+    def __str__(self):
+        return f'Bundle (' \
+               f'\n  "source": {self.source}' \
+               f'\n  "path": {self.path}' \
+               f'\n  "extension": {self.extension}' \
+               f'\n  "resources": {self.resources}' \
+               f'\n  "source_locale": {self.source_locale}' \
+               f'\n  "snapshot_file_path": {self.snapshot_file_path}' \
+               f'\n)\n'
 
     def init_snapshot(self, source):
         snapshot_file_path = source + '.snapshot'
@@ -374,9 +386,9 @@ class Bundle(object):
             return self.bundle_as_dictionary
 
         if self.extension == 'json':
-            self.bundle_as_dictionary = JsonProcessor.get_as_dictionary(self.files)
+            self.bundle_as_dictionary = JsonProcessor.get_as_dictionary(self.resources)
         elif self.extension == 'properties':
-            self.bundle_as_dictionary = PropertiesProcessor.get_as_dictionary(self.files)
+            self.bundle_as_dictionary = PropertiesProcessor.get_as_dictionary(self.resources)
         else:
             sys.exit(
                 f'{self.whoami}: Bundle type of {self.extension} is not one of the supported types')
@@ -416,20 +428,16 @@ class Bundler:
     @staticmethod
     def gather(config):
         all_bundles = []
-        for bundle_config in config.data.get('bundles'):
-            source = bundle_config.get('source')
-            extension = source[source.rfind('.')+1:]
-            bundle_path, source_locale, bundle_extension, locale_resources = ResourceFileHandler.get_bundle_elements(source)
-            all_bundles.append(Bundle(source, extension, locale_resources, source_locale))
+        default_locale = config.get_value(('locales', 'default'))
+        source_paths = config.data.get('sources')
+        resources = ResourceFileHandler.find_resources_in_source_paths(default_locale, source_paths)
+        for resource in resources:
+            bundle = ResourceFileHandler.get_bundle(resource)
+            all_bundles.append(bundle)
         return all_bundles
 
 
 class ManifestGenerator:
-    '''
-        Accepts a list of Bundle objects and apply the necessary parser
-        to generate all the differences between the default_locale, it's corresponding
-        snapshot and all the other locales
-    '''
     @staticmethod
     def generate(options, all_bundles):
         new = []
