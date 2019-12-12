@@ -7,8 +7,8 @@ import re
 import yaml
 import json
 
+from termcolor import colored, cprint
 from abc import ABC, abstractmethod
-
 from translations.utils import Utilities
 
 program = os.path.basename(sys.argv[0])
@@ -35,10 +35,10 @@ class Driver:
             config.load_config()
             config.validate()
             all_bundles = Bundler().gather(config)
-            manifest = ManifestGenerator.generate(options, all_bundles)
+            manifest = ManifestGenerator.generate(all_bundles, config, options)
 
             if options.command == 'view':
-                Utilities.print_data(manifest.data)
+                print(colored(self.whoami, 'blue') + ': ' + str(manifest))
             elif options.command == 'export':
                 exporter = self.instantiate_exporter(config, options)
                 if exporter:
@@ -132,7 +132,7 @@ class Config:
         supported_locales = []
         resources = ResourceFileHandler.find_resources_in_source_paths(init_locale, source_paths)
         for resource in resources:
-            bundle = ResourceFileHandler.get_bundle(resource)
+            bundle = ResourceFileHandler.get_bundle(resource, init_locale)
             print(f'Initiated Bundle: {str(bundle)}')
             for locale_resource in bundle.resources:
                 supported_locale = ResourceFileHandler.get_resource_locale(locale_resource, bundle.path, bundle.extension)
@@ -285,16 +285,25 @@ class ResourceFileHandler:
             for supported_file in ResourceFileHandler.supported_file_types:
                 if source_path[-1:] != '/':
                     source_path = source_path + '/'
-                resources = resources + glob.glob(f'{source_path}**/*[-_]{source_locale}.{supported_file}', recursive=True)
+                resources = resources + glob.glob(f'{source_path}**/*[-_]{source_locale}.{supported_file}',
+                                                  recursive=True)
         return resources
 
     @staticmethod
-    def get_bundle(source):
-        parts = re.split(f'[-_][a-zA-Z]{{2}}[-_][a-zA-Z]{{2}}\.', source, 1)
+    def get_bundle(source, default_locale, supported_locales=None):
+        parts = re.split(f'[-_]{re.escape(default_locale)}\.', source, 1)
         bundle_path = parts[0]
         bundle_extension = parts[1]
-        bundle_resources = glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z][-_][a-zA-Z][a-zA-Z].{bundle_extension}') + \
-                           glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z].{bundle_extension}')
+        bundle_resources = []
+        if supported_locales:
+            locale_postfix_separator = re.search(f'{re.escape(bundle_path)}([-_]){re.escape(default_locale)}.{bundle_extension}',
+                                                 source).group(1)
+            bundle_resources.append(f'{bundle_path}{locale_postfix_separator}{default_locale}.{bundle_extension}')
+            for locale in supported_locales:
+                bundle_resources.append(f'{bundle_path}{locale_postfix_separator}{locale}.{bundle_extension}')
+        else:
+            bundle_resources = glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z][-_][a-zA-Z][a-zA-Z].{bundle_extension}') + \
+                               glob.glob(f'{bundle_path}[-_][a-zA-Z][a-zA-Z].{bundle_extension}')
         default_locale = ResourceFileHandler.get_resource_locale(source, bundle_path, bundle_extension)
         return Bundle(source, bundle_path, bundle_extension, bundle_resources, default_locale)
 
@@ -365,16 +374,23 @@ class Bundle(object):
         self.bundle_as_dictionary = {}
         self.missing_items = {}
         self.new_items = {}
+        self.init_resources()
 
     def __str__(self):
-        return f'Bundle (' \
-               f'\n  "source": {self.source}' \
-               f'\n  "path": {self.path}' \
-               f'\n  "extension": {self.extension}' \
-               f'\n  "resources": {self.resources}' \
-               f'\n  "source_locale": {self.source_locale}' \
-               f'\n  "snapshot_file_path": {self.snapshot_file_path}' \
-               f'\n)\n'
+        str = colored('Bundle', 'magenta') + ' (' + \
+              '\n  ' + colored('source', 'magenta') + ': ' + colored(self.source, 'green') + \
+              '\n  ' + colored('path', 'magenta') + ': ' + colored(self.path, 'green') + \
+              '\n  ' + colored('extension', 'magenta') + ': ' + colored(self.extension, 'green') + \
+              '\n  ' + colored('resources', 'magenta') + ': ' + colored(self.resources, 'green') + \
+              '\n  ' + colored('source_locale', 'magenta') + ': ' + colored(self.source_locale, 'green') + \
+              '\n  ' + colored('snapshot_file_path', 'magenta') + ': ' + colored(self.snapshot_file_path, 'green') + \
+              '\n)\n'
+        return str
+
+    def init_resources(self):
+        for resource in self.resources:
+            if not os.path.exists(resource):
+                ResourceFileHandler.write(resource, {})
 
     def init_snapshot(self, source):
         snapshot_file_path = source + '.snapshot'
@@ -414,16 +430,8 @@ class Bundle(object):
 
         if default != bundle_snapshot_data:
             new_values = {key: val for key, val in default.items() if default[key] not in bundle_snapshot_data.values()}
-            '''
-                TODO: Ignoring the capability to actually make an inplace
-                edit on the default locale file for any key value pair.
-                With the logic currently implemented, this will show up
-                simply as a "new addition" and the snapshot file will
-                become stale with the old key that was actually "removed"
-                in the default locale file. How do we reconcile this?
-            '''
             if new_values:
-                self.new_items[self.source_locale] = new_values
+                self.new_items[self.source] = new_values
         return self.new_items
 
 
@@ -432,17 +440,18 @@ class Bundler:
     def gather(config):
         all_bundles = []
         default_locale = config.get_value(('locales', 'default'))
+        supported_locales = config.get_value(('locales', 'supported'))
         source_paths = config.data.get('sources')
         resources = ResourceFileHandler.find_resources_in_source_paths(default_locale, source_paths)
         for resource in resources:
-            bundle = ResourceFileHandler.get_bundle(resource)
+            bundle = ResourceFileHandler.get_bundle(resource, default_locale, supported_locales)
             all_bundles.append(bundle)
         return all_bundles
 
 
 class ManifestGenerator:
     @staticmethod
-    def generate(options, all_bundles):
+    def generate(all_bundles, config, options):
         new = []
         missing = []
         manifest = Manifest(options)
@@ -454,7 +463,7 @@ class ManifestGenerator:
                 missing.append(missing_items)
             if new_items:
                 new.append(new_items)
-        manifest.build(new, missing)
+        manifest.build(new, missing, config)
         return manifest
 
 
@@ -503,7 +512,37 @@ class Manifest:
     def __init__(self, options):
         self.options = options
 
-    def build(self, new, missing):
+    def __str__(self):
+        tab = '  '
+        str = colored('Manifest', 'magenta') + ' ('
+        if 'locales' in self.data:
+            str += '\n' + tab + colored('locales', 'magenta') + ': '
+            str += '\n' + tab + tab + colored('default', 'magenta') + ': ' + colored(self.data['locales']['default'], 'green')
+            str += '\n' + tab + tab + colored('supported', 'magenta') + ':'
+            for supported_locale in self.data['locales']['supported']:
+                str += '\n' + tab + tab + tab + '- ' + colored(supported_locale, 'green')
+        if 'new' in self.data:
+            str += '\n' + tab + colored('new', 'magenta') + ': '
+            for new in self.data['new']:
+                for resource, messages in new.items():
+                    str += '\n' + tab + tab + colored(resource, 'magenta', attrs=['underline']) + ': '
+                    for message in messages:
+                        str += '\n' + tab + tab + tab + colored(message, 'magenta') + ': ' + colored(messages[message], 'green')
+        if 'missing' in self.data:
+            str += '\n' + tab + colored('missing', 'magenta') + ': '
+            for missing in self.data['missing']:
+                for resource, messages in missing.items():
+                    str += '\n' + tab + tab + colored(resource, 'magenta', attrs=['underline']) + ': '
+                    for message in messages:
+                        str += '\n' + tab + tab + tab + colored(message, 'magenta') + ': ' + colored(messages[message], 'green')
+        str += '\n)\n'
+        return str
+
+    def build(self, new, missing, config):
+        self.data['locales'] = {
+            'default': config.get_value(('locales', 'default')),
+            'supported': config.get_value(('locales', 'supported'))
+        }
         for msg in new:
             self.data['new'] = self.data.get('new') or []
             self.data['new'].append(msg)

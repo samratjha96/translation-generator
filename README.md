@@ -88,5 +88,16 @@ sources:
 where each entry under `sources` corresponds to list of relative paths where the utility will search for message 
 bundles.
 
+# Translations Manifest
+
+The Translations Manifest is the representation of the state of the project's translations. To generate the Manifest, 
+the utility scans the sources defined in the configuration file, looking for message bundles. It uses the previously 
+generated `snapshot` files to determine if thera are new messages added or if previously added messages have been 
+updated. Also, as part of evaluating the sate of the project's translation, the utility determines if there are missing
+messages for any of the supported locales; these are messages that have been previously translated, but for some reason
+it is missing on a supported locale resource.
+
+The structure of the 
+
 * Run `translator view` to display a status of translations based on the config file provided. This display would show 
 messages that are new (have not been translated), and any missing translations from any supported locale.
