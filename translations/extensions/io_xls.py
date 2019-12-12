@@ -1,4 +1,3 @@
-import datetime
 import glob
 import shutil
 import sys
@@ -6,34 +5,41 @@ import zipfile
 import pandas as pd
 
 from openpyxl import Workbook
-from translations.translator import TranslationRequestGenerator, TranslationResponseProcessor
+from termcolor import colored
+from translations.translator import Constants, TranslationRequestGenerator, TranslationResponseProcessor
 from translations.utils import Utilities
 
 
-class Constants:
-    DEFAULT_TRANSL_XLS_PATH = 'translations-xls/'
-    DEFAULT_TRANSL_PKG_NAME = 'translations'
-    WORKING_DIR = 'translations-wrk/'
-    DIST_PATH = 'translations-out/'
+class IOConstants:
+    DEFAULT_TRANSL_XLS_PATH = Constants.WORKING_DIR + 'xls/'
+    OUT_PATH = Constants.WORKING_DIR + 'out/'
+    IN_PATH = Constants.WORKING_DIR + 'in/'
 
 
 class XlsExporter(TranslationRequestGenerator):
     whoami = __qualname__
 
     def __init__(self, config, options):
+        if not options.package:
+            sys.exit(colored(self.whoami, 'red') +
+                     ': Please provide the export package name by adding option "--package=<name>"')
+        self.package = options.package
+
         self.default_locale = config.get_value(('locales', 'default'))
         self.supported_locales = config.get_value(('locales', 'supported'))
-        self.out_name = config.get_value(('export', 'name'))
-        self.export_mapping = config.get_value(('export', 'mapping'))
+        self.export_mapping = config.get_value(('exporter', 'mapping'))
         self.options = options
-        Utilities.init_dir(Constants.DEFAULT_TRANSL_XLS_PATH)
+        Utilities.init_dir(IOConstants.DEFAULT_TRANSL_XLS_PATH)
+        Utilities.init_dir(IOConstants.OUT_PATH)
+        Utilities.init_dir(IOConstants.IN_PATH)
 
     def generate_request(self, manifest):
         target_translations = {}
         for locale in self.supported_locales:
             locale_out_target = self.get_locale_out_target(locale)
             if locale_out_target:
-                print(f'Processing added messages for locale "{locale}" to be included on export "{locale_out_target}"')
+                print(colored(self.whoami, 'blue') +
+                      f': Processing added messages for locale "{locale}" to be included on export "{locale_out_target}"')
                 if locale_out_target in target_translations:
                     translations = target_translations[locale_out_target]
                 else:
@@ -47,14 +53,15 @@ class XlsExporter(TranslationRequestGenerator):
                                 translations.append(message)
                 target_translations[locale_out_target] = translations
             else:
-                print(f'Processing added messages for locale "{locale}" was ignored')
+                print(colored(self.whoami, 'yellow') + f': Processing added messages for locale "{locale}" was ignored')
 
         for resources in manifest.get_missing():
             for resource_path in resources:
                 locale = Utilities.get_locale_from_path(resource_path, self.supported_locales)
                 locale_out_target = self.get_locale_out_target(locale)
                 if locale_out_target:
-                    print(f'Processing missing messages in locale "{locale}" to be included on export "{locale_out_target}"')
+                    print(colored(self.whoami, 'blue') +
+                          f': Processing missing messages in locale "{locale}" to be included on export "{locale_out_target}"')
                     if locale_out_target in target_translations:
                         translations = target_translations[locale_out_target]
                     else:
@@ -65,18 +72,20 @@ class XlsExporter(TranslationRequestGenerator):
                             translations.append(message)
                     target_translations[locale_out_target] = translations
                 else:
-                    print(f'Processing missing messages for locale "{locale}" was ignored')
+                    print(colored(self.whoami, 'yellow') +
+                          f': Processing missing messages for locale "{locale}" was ignored')
 
         for target in target_translations:
-            print(f'Writing locale "{target}" with "{len(target_translations[target])}" translations')
+            print(colored(self.whoami, 'blue') +
+                  f': Writing locale "{target}" with "{len(target_translations[target])}" translations')
             self.write_xls(target, target_translations[target])
 
-        timestamp = datetime.date.today().strftime('%Y%m%d_%H%M%S')
-        print(f'Starting packaging: Using translations XLS in path "{Constants.DEFAULT_TRANSL_XLS_PATH}"')
-        file_name = shutil.make_archive(Constants.DIST_PATH + self.out_name + '_' + str(timestamp),
+        print(colored(self.whoami, 'blue') +
+              f': Starting packaging: Using translations XLS in path "{IOConstants.DEFAULT_TRANSL_XLS_PATH}"')
+        file_name = shutil.make_archive(IOConstants.OUT_PATH + self.package,
                                         'zip',
-                                        Constants.DEFAULT_TRANSL_XLS_PATH)
-        print(f'Package generated in "{file_name}"')
+                                        IOConstants.DEFAULT_TRANSL_XLS_PATH)
+        print(colored(self.whoami, 'blue') + f': Package generated in "{file_name}"')
 
     def get_locale_out_target(self, locale):
         if locale in self.export_mapping:
@@ -98,17 +107,21 @@ class XlsExporter(TranslationRequestGenerator):
             sheet[f'C{row}'] = context_col_value if context_col_value else ''
             row += 1
 
-        workbook.save(Constants.DEFAULT_TRANSL_XLS_PATH + locale + '.xls')
+        workbook.save(IOConstants.DEFAULT_TRANSL_XLS_PATH + locale + '.xls')
 
 
 class XlsImporter(TranslationResponseProcessor):
     whoami = __qualname__
 
     def __init__(self, config, options):
-        self.default_locale = ConfigUtilities.get_value(config, ('locales', 'default'))
-        self.supported_locales = ConfigUtilities.get_value(config, ('locales', 'supported'))
-        self.translations_pkg = ConfigUtilities.get_value(config, ('io', 'in', 'package'))
-        self.import_mapping = ConfigUtilities.get_value(config, ('io', 'in', 'mapping'))
+        if not options.package:
+            sys.exit(colored(self.whoami, 'red') +
+                     ': Please provide the import package name by adding option "--package=<name>"')
+        self.package = options.package
+
+        self.default_locale = config.get_value(('locales', 'default'))
+        self.supported_locales = config.get_value(('locales', 'supported'))
+        self.import_mapping = config.get_value(('importer', 'mapping'))
         self.expected_locales = self.determine_expected_locales()
         self.options = options
 
@@ -131,12 +144,12 @@ class XlsImporter(TranslationResponseProcessor):
         import_manifest = {}
         new_messages = {}
         missing = manifest.data.get('missing')
-        added = manifest.data.get('added')
-        translations = XlsTranslationsProcessor.get_inbound_translations(self.translations_pkg,
+        new = manifest.data.get('new')
+        translations = XlsTranslationsProcessor.get_inbound_translations(self.package,
                                                                          self.default_locale,
                                                                          self.expected_locales)
         if self.options.dump:
-            Utilities.write_to_json_file('translations-raw', translations)
+            Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-raw', translations)
 
         if missing:
             for resource in missing:
@@ -150,8 +163,8 @@ class XlsImporter(TranslationResponseProcessor):
                             if path not in import_manifest:
                                 import_manifest[path] = {}
                             import_manifest[path][key] = translation
-        if added:
-            for resource in added:
+        if new:
+            for resource in new:
                 for source_path, messages in resource.items():
                     source_locale = Utilities.get_locale_from_path(source_path, [self.default_locale])
                     if source_locale:
@@ -172,38 +185,43 @@ class XlsImporter(TranslationResponseProcessor):
                                     new_messages[source_path][key] = message
 
         if self.options.dump:
-            Utilities.write_to_json_file('translations-manifest', import_manifest)
-            Utilities.write_to_json_file('translations-new-messages', new_messages)
+            Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-manifest', import_manifest)
+            Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-new-messages', new_messages)
         return import_manifest, new_messages
 
 
 class XlsTranslationsProcessor:
     @staticmethod
-    def get_inbound_translations(translations_pkg, source_locale, locales):
+    def get_inbound_translations(package, source_locale, locales):
         translations = {}
         try:
-            with zipfile.ZipFile(translations_pkg, 'r') as zip_ref:
-                zip_ref.extractall(Constants.WORKING_DIR)
+            with zipfile.ZipFile(package + '.zip', 'r') as zip_ref:
+                zip_ref.extractall(IOConstants.IN_PATH)
         except:
-            sys.exit(f'Translations ZIP package "{translations_pkg}" not found')
+            sys.exit(f'Translations ZIP package "{package}.zip" not found')
 
-        files = glob.glob(Constants.WORKING_DIR + '**/*.xls', recursive=True) + \
-                glob.glob(Constants.WORKING_DIR + '**/*.xlsx', recursive=True)
+        files = glob.glob(IOConstants.IN_PATH + '**/*.xls', recursive=True) + \
+                glob.glob(IOConstants.IN_PATH + '**/*.xlsx', recursive=True)
         for file in files:
             locale = Utilities.get_locale_from_path(file, locales)
-            print(f'Processing translations for {locale}, from {source_locale}, in file {file}')
-            translations_data = pd.read_excel(file)
-            # Validate
-            if translations_data[source_locale] is None:
-                print(f'Translations in "{file}" does not have a dedicated column for source locale "{source_locale}')
-            if translations_data[locale] is None:
-                print(f'Translations in "{file}" does not have a dedicated column for locale "{locale}')
+            if locale:
+                print(colored(XlsTranslationsProcessor.__qualname__ , 'blue') +
+                      f': Processing translations for {locale}, from {source_locale}, in file {file}')
+                translations_data = pd.read_excel(file)
+                # Validate
+                if source_locale not in translations_data:
+                    print(f'Translations in "{file}" does not have a dedicated column for source locale "{source_locale}')
+                if locale not in translations_data:
+                    print(f'Translations in "{file}" does not have a dedicated column for locale "{locale}')
 
-            if locale not in translations:
-                translations[locale] = {}
-            for i in translations_data.index:
-                message = translations_data[source_locale][i]
-                translation = translations_data[locale][i]
-                translations[locale][message] = translation
+                if locale not in translations:
+                    translations[locale] = {}
+                for i in translations_data.index:
+                    message = translations_data[source_locale][i]
+                    translation = translations_data[locale][i]
+                    translations[locale][message] = translation
+            else:
+                print(colored(XlsTranslationsProcessor.__qualname__ , 'red') +
+                      f': Could not determine locale for translation file: {file}')
 
         return translations

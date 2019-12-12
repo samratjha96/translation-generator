@@ -92,12 +92,121 @@ bundles.
 
 The Translations Manifest is the representation of the state of the project's translations. To generate the Manifest, 
 the utility scans the sources defined in the configuration file, looking for message bundles. It uses the previously 
-generated `snapshot` files to determine if thera are new messages added or if previously added messages have been 
+generated `snapshot` files to determine if there are new messages added or if previously added messages have been 
 updated. Also, as part of evaluating the sate of the project's translation, the utility determines if there are missing
 messages for any of the supported locales; these are messages that have been previously translated, but for some reason
 it is missing on a supported locale resource.
 
-The structure of the 
+Run `translator view` to display a status of translations based on the config file provided. This display would show 
+messages that are new (have not been translated), and any missing translations from any supported locale. 
 
-* Run `translator view` to display a status of translations based on the config file provided. This display would show 
-messages that are new (have not been translated), and any missing translations from any supported locale.
+The Manifest is structured as:
+
+```yaml
+locales: 
+  default: <default_local>
+  supported:
+  - <locale>
+  - ...
+new: 
+  - <default_locale_resource>: 
+    - <message_key>: <message>
+    - ...
+  - ...
+missing: 
+  - <supported_locale_resource>: 
+    - <message_key>: <message>
+    - ...
+  - ...
+```
+
+# Exporting Messages for Translations
+
+This utility supports exporting pending translations into an export artifact that could be provided to a translation 
+service provider. The utility is structured in a way where it can be extended to implement different exporters, to 
+satisfy any specific need. An exporter must comply with the `TranslationRequestGenerator` interface:
+
+```python
+class TranslationRequestGenerator(ABC):
+    @abstractmethod
+    def __init__(self, config, options):
+        pass
+
+    @abstractmethod
+    def generate_request(self, manifest):
+        pass
+``` 
+
+Which implementation the utility uses, is defined by the `config` file by identifying the fully qualified name of the 
+implementation. By default, this utility provides an implementation to export the translation request in XLS format. The
+following config snipped shows how this exporter is configured to be initialized.
+
+```yaml
+exporter:
+  name: translations.extensions.io_xls.XlsExporter
+  ...
+```
+
+The `config` object that represents this configuration file, is passed as an initialization parameter, meaning that the 
+implementation can have access to all configuration defined for the given for the target project. Besides the common 
+configuration elements, additional configuration can be included specific for the exporter implementation. For instance,
+for the XLS exporter, a `mapping` configuration property is added to specify how supported locales are mapped to 
+exported artifacts:
+
+```yaml
+exporter:
+  name: translations.extensions.io_xls.XlsExporter
+  mapping:
+    fr_CA: fr
+    fr_FR: fr
+    en_US: ~
+    en_GB: ~
+```
+
+In this previous example, the configuration is set so that:
+* Supported locales `fr_CA` and `fr_FR` be mapped to the `fr` export artifact
+* Supported locales `en_US` and `en_GB` are going to be ignored by assigning a mapping to `null`
+
+# Importing Translated Messages
+
+Similar to the exporter, the utility supports a mechanism to implement custom importers to support different 
+requirements for importing these messages. An importer must comply with the `TranslationResponseProcessor` interface:
+
+```python
+class TranslationResponseProcessor(ABC):
+    @abstractmethod
+    def __init__(self, config, options):
+        pass
+
+    @abstractmethod
+    def process_response(self, manifest):
+        pass
+```
+
+Which implementation the utility uses, is defined by the `config` file by identifying the fully qualified name of the 
+implementation. By default, this utility provides an implementation to import translations from an XLS formatted
+response. The following config snipped shows how this importer is configured to be initialized.
+
+```yaml
+importer:
+  name: translations.extensions.io_xls.XlsImporter
+  ...
+```
+
+The `config` object that represents this configuration file, is passed as an initialization parameter, meaning that the 
+implementation can have access to all configuration defined for the given for the target project. Besides the common 
+configuration elements, additional configuration can be included specific for the importer implementation. For instance,
+for the XLS importer, a `mapping` configuration property is added to specify incoming translation artifacts are mapped 
+to the supported locales:
+
+```yaml
+importer:
+  name: translations.extensions.io_xls.XlsImporter
+  mapping:
+    fr:
+      - fr_CA
+      - fr_FR
+```
+
+In this previous example, the configuration is set so that:
+* Translated messages from locale `fr` will be mapped to the supported locales `fr_CA` and `fr_FR`

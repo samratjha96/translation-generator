@@ -7,29 +7,39 @@ import re
 import yaml
 import json
 
-from termcolor import colored, cprint
+from termcolor import colored
 from abc import ABC, abstractmethod
 from translations.utils import Utilities
 
 program = os.path.basename(sys.argv[0])
 
 
+class Constants:
+    WORKING_DIR = "./.translations_wrk/"
+    DUMP_PATH = WORKING_DIR + 'dump/'
+
+
 class Driver:
     whoami = __qualname__
+
+    def __init__(self):
+        Utilities.init_dir(Constants.WORKING_DIR)
+        Utilities.init_dir(Constants.DUMP_PATH)
 
     def main(self, args=sys.argv[1:], prog=program):
         options = self.parse_args(args, prog)
         config = Config()
         if options.command == 'version':
             # ToDo: Improve
-            sys.exit(f'{self.whoami}: Version = 1.0.0')
+            sys.exit(colored(self.whoami, 'blue') + ': Version = 1.0.0')
         elif options.command == 'init':
             if not options.init_locale:
                 sys.exit(f'{self.whoami}: cannot initialize if initialization locale is not provided')
             config.init(options.init_locale, options.source_paths)
         elif options.command == 'clean':
             if not options.init_locale:
-                sys.exit(f'{self.whoami}: cannot clean resource snapshots if initialization locale is not provided')
+                sys.exit(colored(self.whoami, 'red') +
+                         f': cannot clean resource snapshots if initialization locale is not provided')
             config.clean(options.init_locale, options.source_paths)
         else:
             config.load_config()
@@ -39,26 +49,29 @@ class Driver:
 
             if options.command == 'view':
                 print(colored(self.whoami, 'blue') + ': ' + str(manifest))
+                if options.dump:
+                    Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-manifest', manifest.data)
             elif options.command == 'export':
                 exporter = self.instantiate_exporter(config, options)
                 if exporter:
                     exporter.generate_request(manifest)
                 else:
-                    print('No exporter defined in configuration file')
+                    print(colored(self.whoami, 'red') + ': Failed to process exporter')
             elif options.command == 'import':
                 importer = self.instantiate_importer(config, options)
                 if importer:
                     translation_updates, new_messages = importer.process_response(manifest)
                     TranslationUpdater.update(translation_updates)
                     SnapshotUpdater(config).update(manifest, new_messages)
-                    Utilities.write_to_json_file('translations-manifest', manifest.data)
-                    Utilities.write_to_json_file('translations-updates', translation_updates)
+                    if self.options.dump:
+                        Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-manifest', manifest.data)
+                        Utilities.write_to_json_file(Constants.DUMP_PATH + 'translations-updates', translation_updates)
                 else:
-                    print('No importer defined in configuration file')
+                    print(colored(self.whoami, 'red') + ': Failed to process importer')
             elif options.command == 'reconcile':
                 Reconciliator(options, all_bundles).reconcile()
             else:
-                sys.exit(f'{self.whoami}: invalid command "{options.command}" provided; likely a programmer error.')
+                sys.exit(colored(self.whoami, 'red') + f': command "{options.command}" currently not supported.')
 
     def parse_args(self, args, prog):
         parser = argparse.ArgumentParser(
@@ -91,24 +104,35 @@ class Driver:
                             help='enable process to dump output files providing information about the execution',
                             action='store_true',
                             default=False)
+        parser.add_argument('-p', '--package',
+                            help='name to be used for the export package, or for the package to be imported',
+                            default=False)
 
         return parser.parse_args(args)
 
     def instantiate_exporter(self, config, options):
+        exporter_class_fqn = None
         try:
-            exporter_class_fqn = config.get_value(('export', 'generator'))
+            exporter_class_fqn = config.get_value(('exporter', 'name'))
+        except:
+            print(colored(self.whoami, 'red') + ': No exporter defined in configuration file')
+
+        if exporter_class_fqn:
             exporter_class = self.get_class(exporter_class_fqn)
             return exporter_class(config, options)
-        except:
-            return None
+        return None
 
     def instantiate_importer(self, config, options):
+        importer_class_fqn = None
         try:
-            importer_class_fqn = config.get_value(('import', 'importer'))
+            importer_class_fqn = config.get_value(('importer', 'name'))
+        except:
+            print(colored(self.whoami, 'red') + ': No importer defined in configuration file')
+
+        if importer_class_fqn:
             importer_class = self.get_class(importer_class_fqn)
             return importer_class(config, options)
-        except:
-            return None
+        return None
 
     def get_class(self, class_fqn):
         module_name = class_fqn[:class_fqn.rfind('.')]
@@ -133,21 +157,21 @@ class Config:
         resources = ResourceFileHandler.find_resources_in_source_paths(init_locale, source_paths)
         for resource in resources:
             bundle = ResourceFileHandler.get_bundle(resource, init_locale)
-            print(f'Initiated Bundle: {str(bundle)}')
+            print(colored(self.whoami, 'blue') + f': Initiated Bundle -> {str(bundle)}')
             for locale_resource in bundle.resources:
                 supported_locale = ResourceFileHandler.get_resource_locale(locale_resource, bundle.path, bundle.extension)
                 if supported_locale:
                     if supported_locale != init_locale and supported_locale not in supported_locales:
                         supported_locales.append(supported_locale)
                 else:
-                    print(f'Did not find locale in path "{locale_resource}"')
+                    print(colored(self.whoami, 'red') + f': Did not find locale in path "{locale_resource}"')
         self.data['locales']['supported'] = supported_locales
         with open(self.config_file, 'w') as outfile:
             yaml.dump(self.data, outfile)
             outfile.write('\n')
 
     def clean(self, init_locale, source_paths):
-        print(f'{self.whoami}: searching for resource snapshots by initialization locale "{init_locale}"...')
+        print(colored(self.whoami, 'blue') + f': searching for resource snapshots by initialization locale "{init_locale}"...')
         resources = ResourceFileHandler.find_resources_in_source_paths(init_locale, source_paths)
         snapshots = []
         for resource in resources:
@@ -155,13 +179,20 @@ class Config:
             if os.path.exists(snapshot):
                 snapshots.append(snapshot)
         if len(snapshots) > 0:
-            reply = Utilities.confirm(f'{self.whoami}: Found "{len(snapshots)}" '
-                                      f'snapshots to clear; delete [a]ll or [c]onfirm each?', ['a', 'c'])
+            reply = Utilities.confirm(colored(self.whoami, 'green') +
+                                      f': Found "{len(snapshots)}" ' +
+                                      'snapshots to clear; delete ' + colored('[a]', 'green') + 'll or ' +
+                                      colored('[c]', 'green') + 'onfirm each?', ['a', 'c'])
             for snapshot in snapshots:
                 if reply == 's':
                     break
                 if reply != 'a':
-                    reply = Utilities.confirm(f'{self.whoami}: Delete snapshot: "{snapshot}" [y]es, [n]o, [a]ll, or [s]top?', ['y', 'n', 'a', 's'])
+                    reply = Utilities.confirm(colored(self.whoami, 'green') +
+                                              ': Delete snapshot: "' + snapshot + '" ' +
+                                              colored('[y]', 'green') + 'es, ' +
+                                              colored('[n]', 'green') + 'o, ' +
+                                              colored('[a]', 'green') + 'll, or ' +
+                                              colored('[s]', 'green') + 'top?', ['y', 'n', 'a', 's'])
                 if reply == 'y' or reply == 'a':
                     os.remove(snapshot)
 
@@ -218,7 +249,7 @@ class JsonProcessor:
 
     @staticmethod
     def write(resource_path, messages):
-        print(f'Writing to file "{resource_path}"')
+        print(colored(JsonProcessor.__qualname__, 'blue') + f': Writing to file "{resource_path}"')
         with open(resource_path, encoding='utf-8', mode='w') as outfile:
             json.dump(messages, outfile, ensure_ascii=False, indent=2)
             outfile.write('\n')
@@ -263,7 +294,8 @@ class PropertiesProcessor:
                         else:
                             current_property = current_property[:-1]
             except Exception as err:
-                print(f'Failed to process resource "{resource_path}", cause: {err}')
+                print(colored(PropertiesProcessor.__qualname__, 'red') +
+                      f': Failed to process resource "{resource_path}", cause: {err}')
         return current_file_key_val
 
     @staticmethod
@@ -324,7 +356,8 @@ class ResourceFileHandler:
         elif extension == 'snapshot':
             return ResourceFileHandler.read(resource_path[:resource_path.rfind('.')])
 
-        print(f'Unsupported resource extension: {extension}')
+        print(colored(ResourceFileHandler.__qualname__, 'red') +
+              f': Unsupported resource extension: {extension}')
         return {}
 
     @staticmethod
@@ -335,7 +368,8 @@ class ResourceFileHandler:
             return PropertiesProcessor.read(snapshot_path)
         elif extension == 'json':
             return JsonProcessor.read(snapshot_path)
-        print(f'Unsupported resource extension: {extension}')
+        print(colored(ResourceFileHandler.__qualname__, 'red') +
+              f': Unsupported resource extension: {extension}')
         return {}
 
     @staticmethod
@@ -346,7 +380,8 @@ class ResourceFileHandler:
         elif extension == 'json':
             JsonProcessor.write(resource_path, translations)
         else:
-            print(f'Unsupported resource extension: {extension}')
+            print(colored(ResourceFileHandler.__qualname__, 'red') +
+                  f': Unsupported resource extension: {extension}')
 
     @staticmethod
     def write_snapshot(snapshot_path, messages):
@@ -357,7 +392,8 @@ class ResourceFileHandler:
         elif extension == 'json':
             JsonProcessor.write(snapshot_path, messages)
         else:
-            print(f'Unsupported resource extension: {extension}')
+            print(colored(ResourceFileHandler.__qualname__, 'red') +
+                  f': Unsupported resource extension: {extension}')
         return {}
 
 
@@ -484,8 +520,8 @@ class SnapshotUpdater:
     whoami = __qualname__
 
     def __init__(self, config):
-        self.default_locale = config.get_value(config, ('locales', 'default'))
-        self.copy_to_locales = config.get_value(config, ('snapshots', 'copy_to'))
+        self.default_locale = config.get_value(('locales', 'default'))
+        self.copy_to_locales = config.get_value(('snapshots', 'copy_to'))
 
     def update(self, manifest, new_messages):
         new = manifest.get_new()
@@ -500,7 +536,8 @@ class SnapshotUpdater:
                             snapshot[key] = message
                         ResourceFileHandler.write_snapshot(snapshot_path, snapshot)
                         for copy_to_locale in self.copy_to_locales:
-                            print(f'Copying snapshot "{snapshot_path}" content to locale {copy_to_locale}\'s resource.')
+                            print(colored(self.whoami, 'blue') +
+                                  f': Copying snapshot "{snapshot_path}" content to locale {copy_to_locale}\'s resource.')
                             ResourceFileHandler.write(
                                 Utilities.replace_locale_in_path(source_path, self.default_locale, copy_to_locale),
                                 snapshot)
@@ -551,10 +588,14 @@ class Manifest:
             self.data['missing'].append(msg)
 
     def get_new(self):
-        return self.data['new'] or []
+        if 'new' in self.data:
+            return self.data['new']
+        return []
 
     def get_missing(self):
-        return self.data['missing'] or []
+        if 'missing' in self.data:
+            return self.data['missing']
+        return []
 
     def print(self):
         if self.options.output == 'json' and self.data:
